@@ -14,6 +14,7 @@
 
 """Self-Play Reinforcement Learning Pipeline using OAT and TextArena."""
 
+import copy
 import functools
 import json
 import logging
@@ -62,10 +63,10 @@ INVALID_ACTION = "[｜INVALID_ACTION｜]"
 @dataclass
 class SelfPlayArgs(PPOArgs):
     # Environment settings
-    env_id: Literal["TicTacToe-v0", "KuhnPoker-v1", "SimpleNegotiation-v1"] = (
-        "KuhnPoker-v1"
-    )
-    use_llm_obs_wrapper: bool = True  # Encode opponent history in the obs
+    env_ids: List[str] = field(default_factory=lambda: ["KuhnPoker-v1"])
+    use_llm_obs_wrappers: List[bool] = field(
+        default_factory=lambda: [True]
+    )  # Encode opponent history in the obs
 
     # Self-play specific settings
     num_envs: int = 1
@@ -83,7 +84,7 @@ class SelfPlayArgs(PPOArgs):
     eval_env_ids: List[str] = field(
         default_factory=lambda: ["TicTacToe-v0", "KuhnPoker-v1", "SimpleNegotiation-v1"]
     )
-    eval_use_llm_obs_wrappers: List[bool] = field(default_factory=lambda: [False, True])
+    eval_use_llm_obs_wrappers: List[bool] = field(default_factory=lambda: [False, True, True])
     eval_opponent_names: List[str] = field(
         default_factory=lambda: ["random", "google/gemini-2.0-flash-lite-001"]
     )
@@ -94,6 +95,8 @@ class SelfPlayArgs(PPOArgs):
 
     # Template settings
     prompt_template: Literal["qwen3", "octothinker", "octothinker_enforce_thinking"] = "qwen3"
+    # Optional override for specific environments
+    prompt_template_overrides: str = ""  # Format: "env1:template1,env2:template2"
 
     # Reward settings
     reward_scaling: float = 1.0  # Scale factor for rewards
@@ -118,6 +121,18 @@ class SelfPlayArgs(PPOArgs):
 
 class SelfPlayActor(PPOActor):
     """Actor class for self-play reinforcement learning."""
+
+    def _parse_template_overrides(self, override_str: str) -> Dict[str, str]:
+        """Parse template overrides from string format 'env1:template1,env2:template2'."""
+        if not override_str:
+            return {}
+
+        overrides = {}
+        for pair in override_str.split(","):
+            if ":" in pair:
+                env, template = pair.split(":")
+                overrides[env.strip()] = template.strip()
+        return overrides
 
     def init(self, actor_id, save_path):
         super().init(actor_id, save_path)
@@ -156,11 +171,18 @@ class SelfPlayActor(PPOActor):
                 self.args.fixed_opponent
             )
         if self.args.use_role_baseline:
-            self.role_baseline_ema = {
-                0: EMA(self.args.role_baseline_ema_gamma),
-                1: EMA(self.args.role_baseline_ema_gamma),
-            }
+            self.role_baseline_ema = {}
+            for env_id in self.args.env_ids:
+                self.role_baseline_ema[env_id] = {
+                    0: EMA(self.args.role_baseline_ema_gamma),
+                    1: EMA(self.args.role_baseline_ema_gamma),
+                }
             logging.info("Using role baseline for reward shaping")
+
+        # Parse overrides once during initialization
+        self._template_overrides = self._parse_template_overrides(
+            self.args.prompt_template_overrides
+        )
 
     def step(
         self, prompts=None, formatted_prompts=None, references=None
@@ -184,11 +206,14 @@ class SelfPlayActor(PPOActor):
         st = time.time()
 
         for i in range(int(1e9)):
-            env_id = self.args.env_id
-            game_trajectories = self.play_game_vectorized(
-                env_id=env_id, seed=int(time.time_ns())
-            )
-            all_trajectories.extend(game_trajectories)
+            # Shuffle environments to mitigate order bias
+            env_ids = copy.deepcopy(self.args.env_ids)
+            random.shuffle(env_ids)
+            for env_id in env_ids:
+                game_trajectories = self.play_game_vectorized(
+                    env_id=env_id, seed=int(time.time_ns())
+                )
+                all_trajectories.extend(game_trajectories)
 
             if len(all_trajectories) >= self.args.rollout_batch_size_per_device:
                 subsample_indices = np.random.choice(
@@ -225,7 +250,7 @@ class SelfPlayActor(PPOActor):
         vec_envs = make_vec_env(
             env_id,
             self.args.num_envs,
-            use_llm_obs_wrapper=self.args.use_llm_obs_wrapper,
+            use_llm_obs_wrapper=self.args.env_to_llm_obs_wrapper[env_id],
         )
 
         for i, env in enumerate(vec_envs):
@@ -420,39 +445,39 @@ class SelfPlayActor(PPOActor):
         """
         clean_actions = []
         extras = []
-        formatted_observations = []
-        for observation in vec_observation:
-            if observation is None:
-                continue
-            formatted_observations.append(
-                TEMPLATE_FACTORY[self.args.prompt_template](
-                    observation, system_prompt=None
-                )
-            )
-
-        sampling_params = (
-            self.eval_sampling_params if self.eval_mode else self.sampling_params
-        )
-        outputs = self.generate(formatted_observations, sampling_params)
-
-        i = 0
         for observation in vec_observation:
             if observation is None:
                 clean_actions.append(None)
                 extras.append(None)
                 continue
 
-            raw_action = outputs[i].outputs[0].text
-            prompt_token_ids = outputs[i].prompt_token_ids
-            token_ids = outputs[i].outputs[0].token_ids
-            action_space = get_valid_action_parser(env_id)(observation)
-            clean_action = self.extract_action(raw_action, action_space)
-            response_is_truncated = outputs[i].outputs[0].finish_reason == "length"
+            # Get template for this specific environment
+            template_name = self._template_overrides.get(
+                env_id, self.args.prompt_template
+            )
+
+            formatted_observation = TEMPLATE_FACTORY[template_name](
+                observation, system_prompt=None
+            )
+            sampling_params = (
+                self.eval_sampling_params if self.eval_mode else self.sampling_params
+            )
+            outputs = self.generate([formatted_observation], sampling_params)
+            raw_action = outputs[0].outputs[0].text
+            prompt_token_ids = outputs[0].prompt_token_ids
+            token_ids = outputs[0].outputs[0].token_ids
+
+            if env_id in ["DontSayIt-v0", "SimpleNegotiation-v1"]:  # DontSayIt-v0 don't have fixed action space
+                clean_action = self.extract_chat_action(raw_action)
+            else:
+                action_space = get_valid_action_parser(env_id)(observation)
+                clean_action = self.extract_action(raw_action, action_space)
+            response_is_truncated = outputs[0].outputs[0].finish_reason == "length"
 
             clean_actions.append(clean_action)
             extras.append(
                 {
-                    "formatted_observation": formatted_observations[i],
+                    "formatted_observation": formatted_observation,
                     "prompt_ids": prompt_token_ids,
                     "response": raw_action,
                     "response_ids": token_ids,
@@ -460,6 +485,19 @@ class SelfPlayActor(PPOActor):
                 }
             )
         return clean_actions, extras
+
+    def extract_chat_action(self, text: str) -> str:
+        answer_match = extract_boxed_answer(text)
+
+        if answer_match is not None:
+            # Found boxed content
+            raw_action = answer_match.strip()
+            if raw_action.strip("\n ") == "":
+                return INVALID_ACTION
+            return raw_action
+        # If no boxed content, try to find <answer> tags
+        else:
+            return INVALID_ACTION
 
     def prepare_trajectories(
         self, game_state: GameState, rewards: Dict[int, float], env_id: str
@@ -487,9 +525,9 @@ class SelfPlayActor(PPOActor):
 
             if self.args.use_role_baseline:
                 # Get the baseline before updating to be unbiased
-                baseline = self.role_baseline_ema[player_id].get()
+                baseline = self.role_baseline_ema[env_id][player_id].get()
                 # Update role-baseline ema
-                self.role_baseline_ema[player_id].update(player_reward)
+                self.role_baseline_ema[env_id][player_id].update(player_reward)
                 player_reward -= baseline
 
             # Compute returns for each action (turn) for this player
@@ -1010,19 +1048,26 @@ if __name__ == "__main__":
 
     args = default_args_validation(args)
 
-    if "KuhnPoker-v1" == args.env_id:
-        assert args.num_envs == 1, "Please set --num_envs 1 for KuhnPoker-v1"
-        assert (
-            args.use_llm_obs_wrapper
-        ), "Please set --use_llm_obs_wrapper for KuhnPoker-v1"
-    elif "TicTacToe-v0" == args.env_id:
-        assert (
-            not args.use_llm_obs_wrapper
-        ), "Please set --no-use_llm_obs_wrapper for TicTacToe-v0"
-    elif "SimpleNegotiation-v1" == args.env_id:
-        assert (
-            args.use_llm_obs_wrapper
-        ), "Please set --use_llm_obs_wrapper for SimpleNegotiation-v1"
+    # Validate that the number of environments matches the number of wrapper settings
+    assert len(args.env_ids) == len(args.use_llm_obs_wrappers), \
+        f"Number of env_ids ({len(args.env_ids)}) must match number of use_llm_obs_wrappers ({len(args.use_llm_obs_wrappers)})"
+    
+    # Create environment to wrapper mapping for quick access
+    args.env_to_llm_obs_wrapper = dict(zip(args.env_ids, args.use_llm_obs_wrappers))
+    
+    # Validate environment-specific requirements
+    for env_id in args.env_ids:
+        if env_id == "KuhnPoker-v1":
+            assert args.num_envs == 1, "Please set --num_envs 1 for KuhnPoker-v1"
+            assert args.env_to_llm_obs_wrapper[env_id], \
+                "Please set --use_llm_obs_wrappers True for KuhnPoker-v1"
+        elif env_id == "TicTacToe-v0":
+            assert not args.env_to_llm_obs_wrapper[env_id], \
+                "Please set --use_llm_obs_wrappers False for TicTacToe-v0"
+        elif env_id == "SimpleNegotiation-v1":
+            assert args.env_to_llm_obs_wrapper[env_id], \
+                "Please set --use_llm_obs_wrappers True for SimpleNegotiation-v1"
+    
     assert len(args.eval_env_ids) == len(args.eval_use_llm_obs_wrappers)
 
     # Let's go

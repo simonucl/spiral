@@ -32,8 +32,8 @@ fi
 python train_spiral.py \
     --use_role_baseline \
     --fixed_opponent google/gemini-2.0-flash-lite-001 \
-    --env_id KuhnPoker-v1 \
-    --use_llm_obs_wrapper \
+    --env_ids KuhnPoker-v1 \
+    --use_llm_obs_wrappers True \
     --eval_env_ids TicTacToe-v0 KuhnPoker-v1 \
     --eval_use_llm_obs_wrappers False True \
     --eval_split all \
@@ -76,4 +76,4 @@ python train_spiral.py \
     --max_save_num 30 \
     --use-wb \
     --wb-run-name ${username}-spiral-octothinker-3b-kuhn-8k \
-    --wb_project spiral
+    --wb_project oat-self-play
