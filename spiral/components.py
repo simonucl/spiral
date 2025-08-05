@@ -27,7 +27,7 @@ from oat.collectors import FeedbackCollector
 from oat.oracles.base import PreferenceOracleBase, RewardOracleBase
 from oat.types import Metric, TrajectoryData
 from oat.utils.ipc import PlasmaShmClient
-from oat.utils.math_grader import boxed_reward_fn
+from oat.utils.math_grader import boxed_reward_fn, answer_tag_reward_fn
 from torch.utils.data import Dataset
 
 
@@ -38,10 +38,13 @@ class MATHOracle(RewardOracleBase, PreferenceOracleBase):
         self, template, verifier_version, correct_reward, incorrect_reward
     ) -> None:
         super().__init__()
-        if template == "qwen3_general":
+        if template in ["qwen3_general", "octothinker_general", "octothinker_enforce_thinking_general"]:
+            math_reward_fn = boxed_reward_fn
+        elif template in ["octothinker", "octothinker_enforce_thinking"]:
+            # Game-based octothinker templates also use boxed format
             math_reward_fn = boxed_reward_fn
         else:
-            raise ValueError
+            raise ValueError(f"Unsupported template: {template}")
 
         self.math_reward_fn = functools.partial(
             math_reward_fn,

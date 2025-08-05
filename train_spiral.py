@@ -87,13 +87,13 @@ class SelfPlayArgs(PPOArgs):
     eval_opponent_names: List[str] = field(
         default_factory=lambda: ["random", "google/gemini-2.0-flash-lite-001"]
     )
-    eval_prompt_template: Literal["qwen3_general"] = "qwen3_general"
+    eval_prompt_template: Literal["qwen3_general", "octothinker_general", "octothinker_enforce_thinking_general"] = "qwen3_general"
 
     # Dump all game data.
     dump_game_state_every: int = 1
 
     # Template settings
-    prompt_template: Literal["qwen3"] = "qwen3"
+    prompt_template: Literal["qwen3", "octothinker", "octothinker_enforce_thinking"] = "qwen3"
 
     # Reward settings
     reward_scaling: float = 1.0  # Scale factor for rewards
@@ -614,6 +614,20 @@ class SelfPlayActor(PPOActor):
                 raw_action = extract_boxed_answer(text)
                 if raw_action is None:
                     raw_action = text.strip()
+                    
+            elif self.args.prompt_template in ["octothinker", "octothinker_enforce_thinking"]:
+                # OctoThinker templates use \boxed{} format for actions
+                raw_action = extract_boxed_answer(text)
+                if raw_action is None:
+                    # Fallback: if enforce_thinking, try to get content after </think>
+                    if "octothinker_enforce_thinking" in self.args.prompt_template:
+                        think_match = re.search(r"</think>\s*(.*)", text, re.DOTALL)
+                        if think_match:
+                            raw_action = think_match.group(1).strip()
+                        else:
+                            raw_action = text.strip()
+                    else:
+                        raw_action = text.strip()
 
             else:
                 raise NotImplementedError
