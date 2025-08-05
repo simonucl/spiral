@@ -53,6 +53,24 @@ register(
     max_turns=50,
 )
 
+# WordChains (two-player)
+register(
+    id="WordChains-v1",
+    entry_point="spiral.envs.WordChains.env:WordChainsEnv",
+)
+
+# SpellingBee (two-player)
+register(
+    id="SpellingBee-v1",
+    entry_point="spiral.envs.SpellingBee.env:SpellingBeeEnv",
+    num_letters=7,
+)
+
+# SimpleBlindAuction (two-player)
+register(
+    id="SimpleBlindAuction-v1",
+    entry_point="spiral.envs.SimpleBlindAuction.env:SimpleBlindAuctionEnv",
+)
 
 def make_env(env_id: str, use_llm_obs_wrapper: bool):
     env = ta.make(env_id)
