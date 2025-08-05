@@ -46,7 +46,7 @@ python train_spiral.py \
     --num_envs 1 \
     --rollout_batch_size_per_device 16 \
     --pi_buffer_maxlen_per_device 16 \
-    --pretrain OctoThinker/OctoThinker-3B-Hybrid-Zero \
+    --pretrain simonycl/octothinker-3b-hybrid-zero-cold-start-step-5 \
     --prompt_template octothinker \
     --enable_prefix_caching \
     --eval_prompt_template octothinker_general \
