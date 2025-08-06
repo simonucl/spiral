@@ -57,6 +57,7 @@ register(
 register(
     id="WordChains-v1",
     entry_point="spiral.envs.WordChains.env:WordChainsEnv",
+    max_tries=2,
 )
 
 # SpellingBee (two-player)
