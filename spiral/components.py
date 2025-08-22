@@ -38,7 +38,10 @@ class MATHOracle(RewardOracleBase, PreferenceOracleBase):
         self, template, verifier_version, correct_reward, incorrect_reward
     ) -> None:
         super().__init__()
-        if template in ["qwen3_general", "r1_general"]:
+        if template in ["qwen3_general", "octothinker_general", "octothinker_enforce_thinking_general"]:
+            math_reward_fn = boxed_reward_fn
+        elif template in ["octothinker", "octothinker_enforce_thinking"]:
+            # Game-based octothinker templates also use boxed format
             math_reward_fn = boxed_reward_fn
         else:
             raise ValueError(f"Unsupported template: {template}")
