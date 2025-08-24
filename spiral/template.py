@@ -96,4 +96,6 @@ TEMPLATE_FACTORY = {
     "octothinker_general": apply_octothinker_general_template,
     "octothinker_enforce_thinking": apply_octothinker_enforce_thinking_template,
     "octothinker_enforce_thinking_general": apply_octothinker_enforce_thinking_general_template,
+    "r1": apply_octothinker_template,
+    "r1_general": apply_octothinker_general_template,
 }
