@@ -1070,7 +1070,7 @@ if __name__ == "__main__":
         elif env_id == "TicTacToe-v0":
             assert not args.env_to_llm_obs_wrapper[env_id], \
                 "Please set --use_llm_obs_wrappers False for TicTacToe-v0"
-        elif env_id == "SimpleNegotiation-v1":
+        elif env_id in "SimpleNegotiation-v1":
             assert args.env_to_llm_obs_wrapper[env_id], \
                 "Please set --use_llm_obs_wrappers True for SimpleNegotiation-v1"
     
