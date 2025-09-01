@@ -116,6 +116,7 @@ _VALID_ACTION_PARSER = {
     "TicTacToe-v0": tic_tac_toe_parse_available_moves,
     "KuhnPoker-v1": kuhn_poker_parse_available_actions,
     "SimpleNegotiation-v1": simple_negotiation_parse_available_actions,
+    "SimpleNegotiation-v2": simple_negotiation_parse_available_actions,
 }
 
 

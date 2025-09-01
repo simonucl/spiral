@@ -35,7 +35,7 @@ from oat.actors.base import ActorBase
 from oat.algorithms.ppo import PPOActor, PPOArgs, PPOLearner
 from oat.args import default_args_validation, get_default_args
 from oat.interface import get_program, lp
-from oat.types import TrajectoryData
+from oat.types import TransitionData
 from oat.utils.data import load_data_from_disk_or_hf
 from oat.utils.ops import masked_mean, masked_sum
 from torch.utils.data import DataLoader
@@ -88,13 +88,13 @@ class SelfPlayArgs(PPOArgs):
     eval_opponent_names: List[str] = field(
         default_factory=lambda: ["random", "google/gemini-2.0-flash-lite-001"]
     )
-    eval_prompt_template: Literal["qwen3_general", "octothinker_general", "octothinker_enforce_thinking_general"] = "qwen3_general"
+    eval_prompt_template: Literal["qwen3_general", "r1_general", "octothinker_general", "octothinker_enforce_thinking_general"] = "qwen3_general"
 
     # Dump all game data.
     dump_game_state_every: int = 1
 
     # Template settings
-    prompt_template: Literal["qwen3", "octothinker", "octothinker_enforce_thinking"] = "qwen3"
+    prompt_template: Literal["qwen3", "r1", "octothinker", "octothinker_enforce_thinking"] = "qwen3"
     # Optional override for specific environments
     prompt_template_overrides: str = ""  # Format: "env1:template1,env2:template2"
 
@@ -186,7 +186,7 @@ class SelfPlayActor(PPOActor):
 
     def step(
         self, prompts=None, formatted_prompts=None, references=None
-    ) -> List[TrajectoryData]:
+    ) -> List[TransitionData]:
         """
         Override step method to play full games rather than single-turn inference.
 
@@ -194,7 +194,7 @@ class SelfPlayActor(PPOActor):
             serialized trajectories data
         """
         # The provided parameters are ignored since we generate prompts from the environment
-        del prompts, formatted_prompts, references
+        del formatted_prompts, references
 
         logging.info(
             f"Actor-{self.actor_id} starting to collect game trajectories at step {self.step_count}"
@@ -215,10 +215,10 @@ class SelfPlayActor(PPOActor):
                 )
                 all_trajectories.extend(game_trajectories)
 
-            if len(all_trajectories) >= self.args.rollout_batch_size_per_device:
+            if len(all_trajectories) >= len(prompts):
                 subsample_indices = np.random.choice(
                     len(all_trajectories),
-                    self.args.rollout_batch_size_per_device,
+                    len(prompts),
                     replace=False,
                 )
                 all_trajectories = [all_trajectories[si] for si in subsample_indices]
@@ -245,7 +245,7 @@ class SelfPlayActor(PPOActor):
         self,
         env_id: str,
         seed: Optional[int] = None,
-    ) -> List[TrajectoryData]:
+    ) -> List[TransitionData]:
         # Create and initialize vectorized environments
         vec_envs = make_vec_env(
             env_id,
@@ -466,6 +466,11 @@ class SelfPlayActor(PPOActor):
             raw_action = outputs[0].outputs[0].text
             prompt_token_ids = outputs[0].prompt_token_ids
             token_ids = outputs[0].outputs[0].token_ids
+            response_logprobs = outputs[0].outputs[0].logprobs
+            response_logprobs = [
+                    item[token_ids[i]].logprob
+                    for i, item in enumerate(response_logprobs)
+                ]
 
             if env_id in ["DontSayIt-v0", "SimpleNegotiation-v1"]:  # DontSayIt-v0 don't have fixed action space
                 clean_action = self.extract_chat_action(raw_action)
@@ -481,6 +486,7 @@ class SelfPlayActor(PPOActor):
                     "prompt_ids": prompt_token_ids,
                     "response": raw_action,
                     "response_ids": token_ids,
+                    "response_logprobs": response_logprobs,
                     "response_is_truncated": response_is_truncated,
                 }
             )
@@ -501,7 +507,7 @@ class SelfPlayActor(PPOActor):
 
     def prepare_trajectories(
         self, game_state: GameState, rewards: Dict[int, float], env_id: str
-    ) -> List[TrajectoryData]:
+    ) -> List[TransitionData]:
         """
         Prepare language trajectories created in the game.
 
@@ -553,13 +559,13 @@ class SelfPlayActor(PPOActor):
 
                 # Add trajectory data
                 trajectory_data.append(
-                    TrajectoryData(
+                    TransitionData(
                         prompt=step_data["prompt"],
                         prompt_ids=step_data["prompt_ids"],
                         response=step_data["response"],
                         response_ids=step_data["response_ids"],
-                        response_logprobs=None,  # Re-calculated on learner side.
-                        # response_logprobs=step_data["response_logprobs"],
+                        # response_logprobs=None,  # Re-calculated on learner side.
+                        response_logprobs=step_data["response_logprobs"],
                         rewards=dense_rewards,
                         loss_mask=(
                             not step_data["response_is_truncated"]
@@ -854,7 +860,7 @@ class SelfPlayLearner(PPOLearner):
             answers.append(item["answer"])
         return formatted_problems, problems, answers
 
-    def process_feedback_data(self, data_list: List[TrajectoryData]):
+    def process_feedback_data(self, data_list: List[TransitionData]):
         """Process collected feedback data, adding it to buffer."""
 
         logging.info("adding data into buffer")
@@ -1064,7 +1070,7 @@ if __name__ == "__main__":
         elif env_id == "TicTacToe-v0":
             assert not args.env_to_llm_obs_wrapper[env_id], \
                 "Please set --use_llm_obs_wrappers False for TicTacToe-v0"
-        elif env_id == "SimpleNegotiation-v1":
+        elif env_id in "SimpleNegotiation-v1":
             assert args.env_to_llm_obs_wrapper[env_id], \
                 "Please set --use_llm_obs_wrappers True for SimpleNegotiation-v1"
     
