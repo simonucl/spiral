@@ -112,10 +112,14 @@ class SimpleNegotiationFiveResourceEnv(ta.Env):
             from_id=self.state.current_player_id, to_id=-1, message=action
         )
 
-        # Check if any valid pattern is matched
-        accept_match = self.accept_pattern.search(action)
-        deny_match = self.deny_pattern.search(action)
-        offer_match = self.offer_pattern.search(action)
+        try:
+            # This handle the case where the action is not a string
+            action_str = str(action)
+            accept_match = self.accept_pattern.search(action_str)
+            deny_match = self.deny_pattern.search(action_str)
+            offer_match = self.offer_pattern.search(action_str)
+        except Exception as e:
+            accept_match = deny_match = offer_match = None
         
         if not (accept_match or deny_match or offer_match):
             reason = f"Action must be [Accept], [Deny], or [Offer: Offered Resources -> Requested Resources]."
@@ -372,6 +376,12 @@ class SimpleNegotiationFiveResourceEnv(ta.Env):
             offer_str = re.sub(
                 r"^(I\s+(?:give|offer)\s+)", "", offer_str, flags=re.IGNORECASE
             )
+            
+            # Handle LaTeX arrow commands
+            offer_str = re.sub(r"\\to\b", "->", offer_str)
+            offer_str = re.sub(r"\\rightarrow\b", "->", offer_str)
+            offer_str = re.sub(r"\\Rightarrow\b", "->", offer_str)
+            offer_str = re.sub(r"\\longrightarrow\b", "->", offer_str)
             
             offer_parts = re.split(r"\s*->\s*", offer_str)
             if len(offer_parts) != 2:
