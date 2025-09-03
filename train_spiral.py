@@ -82,7 +82,7 @@ class SelfPlayArgs(PPOArgs):
     # Game evaluation
     eval_games: int = 16  # Number of games for evaluation
     eval_env_ids: List[str] = field(
-        default_factory=lambda: ["TicTacToe-v0", "KuhnPoker-v1", "SimpleNegotiation-v1"]
+        default_factory=lambda: ["TicTacToe-v0", "KuhnPoker-v1", "SimpleNegotiation-v1", "SimpleNegotiation-v2"]
     )
     eval_use_llm_obs_wrappers: List[bool] = field(default_factory=lambda: [False, True, True])
     eval_opponent_names: List[str] = field(
@@ -472,7 +472,7 @@ class SelfPlayActor(PPOActor):
                     for i, item in enumerate(response_logprobs)
                 ]
 
-            if env_id in ["DontSayIt-v0", "SimpleNegotiation-v1"]:  # DontSayIt-v0 don't have fixed action space
+            if env_id in ["DontSayIt-v0", "SimpleNegotiation-v1", "SimpleNegotiation-v2"]:  # DontSayIt-v0 don't have fixed action space
                 clean_action = self.extract_chat_action(raw_action)
             else:
                 action_space = get_valid_action_parser(env_id)(observation)
@@ -1070,7 +1070,7 @@ if __name__ == "__main__":
         elif env_id == "TicTacToe-v0":
             assert not args.env_to_llm_obs_wrapper[env_id], \
                 "Please set --use_llm_obs_wrappers False for TicTacToe-v0"
-        elif env_id in "SimpleNegotiation-v1":
+        elif env_id in ["SimpleNegotiation-v1", "SimpleNegotiation-v2"]:
             assert args.env_to_llm_obs_wrapper[env_id], \
                 "Please set --use_llm_obs_wrappers True for SimpleNegotiation-v1"
     
