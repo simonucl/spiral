@@ -706,7 +706,6 @@ class SelfPlayActor(PPOActor):
                 for pattern in action_space:
                     match = pattern.match(formatted_action)
                     if match:
-                        formatted_action = match.group(1)
                         break
                 if not match:
                     formatted_action = INVALID_ACTION
