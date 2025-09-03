@@ -35,8 +35,8 @@ register(
 # Simple Negotiation (five-resource)
 register(
     id="SimpleNegotiation-v1",
-    entry_point="spiral.envs.SimpleNegotiation.five_resource_env:SimpleNegotiationEnv",
-    max_turns=15,
+    entry_point="spiral.envs.SimpleNegotiation.env:SimpleNegotiationEnv",
+    max_turns=10,
 )
 
 register(
