@@ -31,7 +31,6 @@ fi
 # OctoThinker training with self-play configuration
 python train_spiral.py \
     --use_role_baseline \
-    --fixed_opponent google/gemini-2.0-flash-lite-001 \
     --env_ids KuhnPoker-v1 TicTacToe-v0 \
     --use_llm_obs_wrappers True False \
     --eval_env_ids TicTacToe-v0 KuhnPoker-v1 \

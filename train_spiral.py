@@ -472,8 +472,11 @@ class SelfPlayActor(PPOActor):
                     for i, item in enumerate(response_logprobs)
                 ]
 
-            if env_id in ["DontSayIt-v0", "SimpleNegotiation-v1", "SimpleNegotiation-v2"]:  # DontSayIt-v0 don't have fixed action space
+            if env_id in ["DontSayIt-v0", "SimpleNegotiation-v1"]:  # DontSayIt-v0 don't have fixed action space
                 clean_action = self.extract_chat_action(raw_action)
+            elif env_id == "SimpleNegotiation-v2":
+                action_space = get_valid_action_parser(env_id)(observation)
+                clean_action = self.extract_action(raw_action, action_space)
             else:
                 action_space = get_valid_action_parser(env_id)(observation)
                 clean_action = self.extract_action(raw_action, action_space)
@@ -699,8 +702,17 @@ class SelfPlayActor(PPOActor):
             formatted_action = re.sub(r"\s+", " ", formatted_action).strip()
 
             # NOTE(zc): ad-hoc postprocessing, strictly enforcing action space.
-            if formatted_action not in action_space:
-                formatted_action = INVALID_ACTION
+            if isinstance(action_space[0], re.Pattern):
+                for pattern in action_space:
+                    match = pattern.match(formatted_action)
+                    if match:
+                        formatted_action = match.group(1)
+                        break
+                if not match:
+                    formatted_action = INVALID_ACTION
+            else:
+                if formatted_action not in action_space:
+                    formatted_action = INVALID_ACTION
 
             return formatted_action
 

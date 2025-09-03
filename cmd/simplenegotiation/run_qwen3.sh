@@ -31,10 +31,10 @@ fi
 # OctoThinker training with self-play configuration
 python train_spiral.py \
     --use_role_baseline \
-    --env_ids KuhnPoker-v1 TicTacToe-v0 \
-    --use_llm_obs_wrappers True False \
-    --eval_env_ids TicTacToe-v0 KuhnPoker-v1 \
-    --eval_use_llm_obs_wrappers False True \
+    --env_ids SimpleNegotiation-v2 \
+    --use_llm_obs_wrappers True \
+    --eval_env_ids TicTacToe-v0 KuhnPoker-v1 SimpleNegotiation-v2 \
+    --eval_use_llm_obs_wrappers False True True \
     --eval_split all \
     --gamma 1 \
     --gpus 8 \
@@ -45,13 +45,13 @@ python train_spiral.py \
     --num_envs 1 \
     --rollout_batch_size_per_device 16 \
     --pi_buffer_maxlen_per_device 16 \
-    --pretrain simonycl/octothinker-3b-hybrid-zero-cold-start-step-5 \
-    --prompt_template octothinker \
+    --pretrain qwen/Qwen3-4B-Base \
+    --prompt_template qwen3 \
     --enable_prefix_caching \
-    --eval_prompt_template octothinker_general \
+    --eval_prompt_template qwen3_general \
     --collocate \
     --vllm_sleep \
-    --vllm_gpu_ratio 0.65 \
+    --vllm_gpu_ratio 0.70 \
     --rnd-seed \
     --learning_rate 0.000001 \
     --lr_scheduler constant \
@@ -73,6 +73,7 @@ python train_spiral.py \
     --eval_generate_max_length 8192 \
     --max_train 65000 \
     --max_save_num 30 \
+    --debug \
     --use-wb \
-    --wb-run-name ${username}-spiral-octothinker-3b-multi-8k \
+    --wb-run-name ${username}-spiral-qwen3-4b-simplenegotiation-v2 \
     --wb_project oat-self-play

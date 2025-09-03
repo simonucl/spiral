@@ -111,12 +111,20 @@ def simple_negotiation_parse_available_actions(observation: str):
 
     return valid_actions if valid_actions else ["I'll think about my options."]
 
+def simple_negotiation_v2_action_parser(observation: str):
+    accept_pattern = re.compile(r"\[Accept\]", re.IGNORECASE)
+    deny_pattern = re.compile(r"\[Deny\]", re.IGNORECASE)
+    offer_pattern = re.compile(
+            r"\[Offer:\s*(?:I\s+(?:give|offer)\s+)?([^\[\]]+?)\s*\.*\]",
+            re.IGNORECASE | re.DOTALL,
+        )
+    return [accept_pattern, deny_pattern, offer_pattern]
 
 _VALID_ACTION_PARSER = {
     "TicTacToe-v0": tic_tac_toe_parse_available_moves,
     "KuhnPoker-v1": kuhn_poker_parse_available_actions,
     "SimpleNegotiation-v1": simple_negotiation_parse_available_actions,
-    "SimpleNegotiation-v2": simple_negotiation_parse_available_actions,
+    "SimpleNegotiation-v2": simple_negotiation_v2_action_parser,
 }
 
 
