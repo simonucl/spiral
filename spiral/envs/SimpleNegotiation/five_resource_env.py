@@ -51,8 +51,6 @@ class SimpleNegotiationFiveResourceEnv(ta.Env):
             "    Example: [Offer: 3 Wood -> 2 Sheep] or [Offer: 2 Wood + 2 Sheep -> 1 Brick + 1 Gold]\n"
             "  - [Accept]: To accept an incoming offer.\n"
             "  - [Deny]: To deny an incoming offer (default).\n"
-            "YOU CAN INCLUDE ADDITIONAL TEXT BEFORE AND/OR AFTER THESE TOKENS.\n"
-            '    Example: "I\'m open to negotiation."\n'
         )
         if self.state.max_turns:
             prompt += f"The game lasts for {self.state.max_turns} turns in total.\n"
@@ -114,13 +112,22 @@ class SimpleNegotiationFiveResourceEnv(ta.Env):
             from_id=self.state.current_player_id, to_id=-1, message=action
         )
 
-        # Check if the player is responding to an existing offer
-        self._check_and_execute_existing_offer(
-            player_id=self.state.current_player_id, action=action
-        )
+        # Check if any valid pattern is matched
+        accept_match = self.accept_pattern.search(action)
+        deny_match = self.deny_pattern.search(action)
+        offer_match = self.offer_pattern.search(action)
+        
+        if not (accept_match or deny_match or offer_match):
+            reason = f"Action must be [Accept], [Deny], or [Offer: Offered Resources -> Requested Resources]."
+            self.state.set_invalid_move(player_id=self.state.current_player_id, reason=reason)
+        else:
+            # Check if the player is responding to an existing offer
+            self._check_and_execute_existing_offer(
+                player_id=self.state.current_player_id, action=action
+            )
 
-        # Check if the player's action contains a new trade offer
-        self._check_for_new_offer(player_id=self.state.current_player_id, action=action)
+            # Check if the player's action contains a new trade offer
+            self._check_for_new_offer(player_id=self.state.current_player_id, action=action)
 
         # Since turn starts at 0, we check if next turn would exceed limit
         if (
@@ -144,6 +151,12 @@ class SimpleNegotiationFiveResourceEnv(ta.Env):
         current_offer = self.state.game_state.get("current_offer")
 
         if not current_offer:
+            if self.accept_pattern.search(action):
+                reason = f"Player {player_id} tried to accept an offer that does not exist."
+                self.state.set_invalid_move(player_id=player_id, reason=reason)
+            elif self.deny_pattern.search(action):
+                reason = f"Player {player_id} tried to deny an offer that does not exist."
+                self.state.set_invalid_move(player_id=player_id, reason=reason)
             return
 
         # Check if player is the recipient of the offer
@@ -151,6 +164,9 @@ class SimpleNegotiationFiveResourceEnv(ta.Env):
             # Player cannot accept/deny an offer not made to them
             if self.accept_pattern.search(action):
                 reason = f"Player {player_id} tried to accept an offer that was not made to them."
+                self.state.set_invalid_move(player_id=player_id, reason=reason)
+            elif self.deny_pattern.search(action):
+                reason = f"Player {player_id} tried to deny an offer that was not made to them."
                 self.state.set_invalid_move(player_id=player_id, reason=reason)
             return
 
@@ -261,7 +277,7 @@ class SimpleNegotiationFiveResourceEnv(ta.Env):
                 return False
         return True
 
-    def _check_for_new_offer(self, player_id: int, action: str):
+    def _check_for_new_offer(self, player_id: int, action: str) -> None:
         """
         Check if the player's action contains a new trade offer.
 
