@@ -48,7 +48,7 @@ class SimpleNegotiationFiveResourceEnv(ta.Env):
             "Use the following special tokens for actions:\n"
             "  - [Offer]: To make a trade offer.\n"
             "    Format: [Offer: Offered Resources -> Requested Resources]\n"
-            "    Example: [Offer: 3 Wood -> 2 Sheep]\n"
+            "    Example: [Offer: 3 Wood -> 2 Sheep] or [Offer: 2 Wood + 2 Sheep -> 1 Brick + 1 Gold]\n"
             "  - [Accept]: To accept an incoming offer.\n"
             "  - [Deny]: To deny an incoming offer (default).\n"
             "YOU CAN INCLUDE ADDITIONAL TEXT BEFORE AND/OR AFTER THESE TOKENS.\n"
