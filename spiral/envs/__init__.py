@@ -32,6 +32,12 @@ register(
     max_turns=10,
 )
 
+register(
+    id="SimpleNegotiation-v2",
+    entry_point="spiral.envs.SimpleNegotiation.five_resource_env:SimpleNegotiationFiveResourceEnv",
+    max_turns=10,
+)
+
 # Liar's Dice (two-player)
 register(
     id="LiarsDice-v1",
