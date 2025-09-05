@@ -76,6 +76,7 @@ class SelfPlayArgs(PPOArgs):
     filter_zero_adv: bool = (
         True  # Make gradient less noisy by filtering zero-gradient trajectories
     )
+    filter_draw: bool = True  # Filter out draw games
     use_role_baseline: bool = True  # Use role baseline for reward shaping
     role_baseline_ema_gamma: float = 0.95
 
@@ -246,163 +247,192 @@ class SelfPlayActor(PPOActor):
         env_id: str,
         seed: Optional[int] = None,
     ) -> List[TransitionData]:
-        # Create and initialize vectorized environments
-        vec_envs = make_vec_env(
-            env_id,
-            self.args.num_envs,
-            use_llm_obs_wrapper=self.args.env_to_llm_obs_wrapper[env_id],
-        )
-
-        for i, env in enumerate(vec_envs):
-            env.reset(num_players=2, seed=seed + i)
-            env.state.error_allowance = 0
-
-        # Initialize game state
-        vec_game_states = [
-            GameState(
-                max_context_length=self.args.max_context_length,
-                max_turns=self.args.max_turns,
+        # Keep track of completed games and their trajectories
+        completed_trajectories = []
+        target_num_games = self.args.num_envs
+        
+        while len(completed_trajectories) < target_num_games:
+            # Create and initialize vectorized environments
+            remaining_games = target_num_games - len(completed_trajectories)
+            current_batch_size = min(remaining_games, self.args.num_envs)
+            
+            vec_envs = make_vec_env(
+                env_id,
+                current_batch_size,
+                use_llm_obs_wrapper=self.args.env_to_llm_obs_wrapper[env_id],
             )
-            for _ in range(self.args.num_envs)
-        ]
-        vec_done = [False] * self.args.num_envs
-        vec_rewards = [None] * self.args.num_envs
 
-        # Main game loop
-        while not all(vec_done):
-            # Get current player and observation
-            vec_player_id = []
-            vec_observation = []
-            for i in range(self.args.num_envs):
-                if not vec_done[i]:
-                    env = vec_envs[i]
-                    player_id, observation = env.get_observation()
-                    vec_player_id.append(player_id)
-                    vec_observation.append(observation)
-                else:
-                    vec_player_id.append(None)
-                    vec_observation.append(None)
+            for i, env in enumerate(vec_envs):
+                env.reset(num_players=2, seed=seed + len(completed_trajectories) + i)
+                env.state.error_allowance = 0
 
-            _mean_pid = np.mean([x for x in vec_player_id if x is not None])
-            assert _mean_pid == 0 or _mean_pid == 1, "vec_env player_id not consistent"
-            _curr_pid = vec_player_id[0]
-
-            # --- [BEGIN] Fixed Opponent Logic Init ---
-            agent_act = self.agent_act
-            _fixed_opponent = ""
-            if self.args.fixed_opponent and _curr_pid == 1 - self.online_model_player:
-                logging.info(
-                    f"player{_curr_pid} using fixed opponent={self.args.fixed_opponent}"
+            # Initialize game state
+            vec_game_states = [
+                GameState(
+                    max_context_length=self.args.max_context_length,
+                    max_turns=self.args.max_turns,
                 )
-                _fixed_opponent = self.args.fixed_opponent
-                agent_act = partial(
-                    self.fixed_opponent_act, opponent_type=_fixed_opponent
-                )
-            # --- [END] Fixed Opponent Logic Init ---
+                for _ in range(current_batch_size)
+            ]
+            vec_done = [False] * current_batch_size
+            vec_rewards = [None] * current_batch_size
 
-            vec_action, vec_extras = agent_act(vec_observation, env_id=env_id)
+            # Main game loop
+            while not all(vec_done):
+                # Get current player and observation
+                vec_player_id = []
+                vec_observation = []
+                for i in range(current_batch_size):
+                    if not vec_done[i]:
+                        env = vec_envs[i]
+                        player_id, observation = env.get_observation()
+                        vec_player_id.append(player_id)
+                        vec_observation.append(observation)
+                    else:
+                        vec_player_id.append(None)
+                        vec_observation.append(None)
 
-            for i in range(self.args.num_envs):
-                if not vec_done[i]:
-                    game_state = vec_game_states[i]
-                    player_id = vec_player_id[i]
-                    observation = vec_observation[i]
-                    action = vec_action[i]
-                    extras = vec_extras[i]
+                _mean_pid = np.mean([x for x in vec_player_id if x is not None])
+                assert _mean_pid == 0 or _mean_pid == 1, "vec_env player_id not consistent"
+                _curr_pid = vec_player_id[0]
 
-                    # Store trajectory data
-                    game_state.add_trajectory_data(
-                        player_id,
-                        {
-                            "prompt": observation,
-                            "action": action,
-                            "action_is_valid": action != INVALID_ACTION,
-                            "player_id": (
-                                player_id if not _fixed_opponent else _fixed_opponent
-                            ),
-                            "turn": game_state.turn_count,
-                            **extras,
-                        },
+                # --- [BEGIN] Fixed Opponent Logic Init ---
+                agent_act = self.agent_act
+                _fixed_opponent = ""
+                if self.args.fixed_opponent and _curr_pid == 1 - self.online_model_player:
+                    logging.info(
+                        f"player{_curr_pid} using fixed opponent={self.args.fixed_opponent}"
                     )
-
-                    # Add to game history
-                    _thinking = extras["response"]
-                    _thinking += (
-                        "...(truncated)" if extras["response_is_truncated"] else ""
+                    _fixed_opponent = self.args.fixed_opponent
+                    agent_act = partial(
+                        self.fixed_opponent_act, opponent_type=_fixed_opponent
                     )
-                    game_state.add_interaction(
-                        player_id, observation, action, _thinking
-                    )
+                # --- [END] Fixed Opponent Logic Init ---
 
-            # Take step in environment
-            for i in range(self.args.num_envs):
-                if not vec_done[i]:
-                    env = vec_envs[i]
-                    action = vec_action[i]
-                    player_id = vec_player_id[i]
-                    done, _ = env.step(action=action)
-                    if action == INVALID_ACTION:
-                        done = True
-                    vec_done[i] = done
-                    if done and action == INVALID_ACTION:
-                        rewards = {0: 0.5, 1: 0.5}
-                        rewards[player_id] = -1.5
-                        vec_rewards[i] = rewards
+                vec_action, vec_extras = agent_act(vec_observation, env_id=env_id)
 
-            # Check if game should be truncated
-            for i in range(self.args.num_envs):
-                if not vec_done[i]:
-                    game_state = vec_game_states[i]
-                    if game_state.is_truncated():
-                        logging.warning(
-                            f"Game truncated after {game_state.turn_count} turns"
+                for i in range(current_batch_size):
+                    if not vec_done[i]:
+                        game_state = vec_game_states[i]
+                        player_id = vec_player_id[i]
+                        observation = vec_observation[i]
+                        action = vec_action[i]
+                        extras = vec_extras[i]
+
+                        # Store trajectory data
+                        game_state.add_trajectory_data(
+                            player_id,
+                            {
+                                "prompt": observation,
+                                "action": action,
+                                "action_is_valid": action != INVALID_ACTION,
+                                "player_id": (
+                                    player_id if not _fixed_opponent else _fixed_opponent
+                                ),
+                                "turn": game_state.turn_count,
+                                **extras,
+                            },
                         )
-                        # Set draw rewards
-                        rewards = {0: 0, 1: 0}
-                        vec_done[i] = True
-                        vec_rewards[i] = rewards
 
-        for i in range(self.args.num_envs):
-            if vec_rewards[i] is None:
-                assert vec_done[i]
-                vec_rewards[i] = vec_envs[i].close()
-        # Dump the game state for debugging.
-        if (
-            self.args.dump_game_state_every > 0
-            and self.step_count % self.args.dump_game_state_every == 0
-        ):
-            pickle.dump(
-                {
-                    "vec_game_states": vec_game_states,
-                    "vec_rewards": vec_rewards,
-                },
-                open(
-                    os.path.join(
-                        self.game_state_save_path,
-                        f"actor{self.actor_id}_step{self.step_count}.pkl",
-                    ),
-                    "wb",
-                ),
-            )
-            vec_history = [gs.long_history for gs in vec_game_states]
+                        # Add to game history
+                        _thinking = extras["response"]
+                        _thinking += (
+                            "...(truncated)" if extras["response_is_truncated"] else ""
+                        )
+                        game_state.add_interaction(
+                            player_id, observation, action, _thinking
+                        )
 
-            json.dump(
-                [{"reward": r, "history": h} for r, h in zip(vec_rewards, vec_history)],
-                open(
-                    os.path.join(
-                        self.game_state_save_path,
-                        f"actor{self.actor_id}_step{self.step_count}.json",
-                    ),
-                    "w",
-                ),
-                indent=4,
-            )
+                # Take step in environment
+                for i in range(current_batch_size):
+                    if not vec_done[i]:
+                        env = vec_envs[i]
+                        action = vec_action[i]
+                        player_id = vec_player_id[i]
+                        done, _ = env.step(action=action)
+                        if action == INVALID_ACTION:
+                            done = True
+                        vec_done[i] = done
+                        if done and action == INVALID_ACTION:
+                            rewards = {0: 0.5, 1: 0.5}
+                            rewards[player_id] = -1.5
+                            vec_rewards[i] = rewards
 
-        trajectories = []
-        for game_state, rewards in zip(vec_game_states, vec_rewards):
-            trajectories.extend(self.prepare_trajectories(game_state, rewards, env_id))
+                # Check if game should be truncated
+                for i in range(current_batch_size):
+                    if not vec_done[i]:
+                        game_state = vec_game_states[i]
+                        if game_state.is_truncated():
+                            logging.warning(
+                                f"Game truncated after {game_state.turn_count} turns"
+                            )
+                            # Set draw rewards
+                            rewards = {0: 0, 1: 0}
+                            vec_done[i] = True
+                            vec_rewards[i] = rewards
 
-        return trajectories
+            for i in range(current_batch_size):
+                if vec_rewards[i] is None:
+                    assert vec_done[i]
+                    vec_rewards[i] = vec_envs[i].close()
+            
+            # Filter out draws and add non-draw games to completed trajectories
+            for i in range(current_batch_size):
+                game_state = vec_game_states[i]
+                rewards = vec_rewards[i]
+                
+                # Check if this is a draw (both players get 0 reward)
+                is_draw = rewards[0] == rewards[1] == 0
+                
+                if not is_draw or not self.args.filter_draw:
+                    # Add non-draw trajectories to completed list
+                    trajectories = self.prepare_trajectories(game_state, rewards, env_id)
+                    completed_trajectories.extend(trajectories)
+                else:
+                    logging.info(f"Draw detected, resampling game...")
+
+            # Dump the game state for debugging (only for non-draw games)
+            if (
+                self.args.dump_game_state_every > 0
+                and self.step_count % self.args.dump_game_state_every == 0
+            ):
+                # Only dump non-draw games
+                non_draw_game_states = []
+                non_draw_rewards = []
+                for i in range(current_batch_size):
+                    if not (vec_rewards[i][0] == vec_rewards[i][1] == 0):
+                        non_draw_game_states.append(vec_game_states[i])
+                        non_draw_rewards.append(vec_rewards[i])
+                
+                if non_draw_game_states:  # Only dump if there are non-draw games
+                    pickle.dump(
+                        {
+                            "vec_game_states": non_draw_game_states,
+                            "vec_rewards": non_draw_rewards,
+                        },
+                        open(
+                            os.path.join(
+                                self.game_state_save_path,
+                                f"actor{self.actor_id}_step{self.step_count}.pkl",
+                            ),
+                            "wb",
+                        ),
+                    )
+                    vec_history = [gs.long_history for gs in non_draw_game_states]
+
+                    json.dump(
+                        [{"reward": r, "history": h} for r, h in zip(non_draw_rewards, vec_history)],
+                        open(
+                            os.path.join(
+                                self.game_state_save_path,
+                                f"actor{self.actor_id}_step{self.step_count}.json",
+                            ),
+                            "w",
+                        ),
+                        indent=4,
+                    )
+
+        return completed_trajectories
 
     def fixed_opponent_act(
         self, vec_observation: List[str], env_id: str, opponent_type: str = "random"
