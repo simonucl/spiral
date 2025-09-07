@@ -77,6 +77,7 @@ class SelfPlayArgs(PPOArgs):
         True  # Make gradient less noisy by filtering zero-gradient trajectories
     )
     filter_draw: bool = True  # Filter out draw games
+    max_draw_retries: int = 5  # Maximum number of retries when filtering draws
     use_role_baseline: bool = True  # Use role baseline for reward shaping
     role_baseline_ema_gamma: float = 0.95
 
@@ -250,6 +251,7 @@ class SelfPlayActor(PPOActor):
         # Keep track of completed games and their trajectories
         completed_trajectories = []
         target_num_games = self.args.num_envs
+        draw_retry_count = 0  # Track how many times we've retried due to draws
         
         while len(completed_trajectories) < target_num_games:
             # Create and initialize vectorized environments
@@ -377,6 +379,7 @@ class SelfPlayActor(PPOActor):
                     vec_rewards[i] = vec_envs[i].close()
             
             # Filter out draws and add non-draw games to completed trajectories
+            batch_has_draws_to_retry = False
             for i in range(current_batch_size):
                 game_state = vec_game_states[i]
                 rewards = vec_rewards[i]
@@ -384,12 +387,22 @@ class SelfPlayActor(PPOActor):
                 # Check if this is a draw (both players get 0 reward)
                 is_draw = rewards[0] == rewards[1] == 0
                 
-                if not is_draw or not self.args.filter_draw:
-                    # Add non-draw trajectories to completed list
+                if (not is_draw) or (not self.args.filter_draw) or (draw_retry_count >= self.args.max_draw_retries):
+                    # Add trajectories to completed list if:
+                    # 1. Not a draw, OR
+                    # 2. Draw filtering is disabled, OR  
+                    # 3. We've reached the maximum retry limit
+                    if is_draw and draw_retry_count >= self.args.max_draw_retries:
+                        logging.info(f"Draw detected but max retries ({self.args.max_draw_retries}) reached, accepting draw...")
                     trajectories = self.prepare_trajectories(game_state, rewards, env_id)
                     completed_trajectories.extend(trajectories)
                 else:
-                    logging.info(f"Draw detected, resampling game...")
+                    logging.info(f"Draw detected, resampling game... (retry {draw_retry_count + 1}/{self.args.max_draw_retries})")
+                    batch_has_draws_to_retry = True
+            
+            # Increment retry counter only when we have draws that we're retrying
+            if batch_has_draws_to_retry:
+                draw_retry_count += 1
 
             # Dump the game state for debugging (only for non-draw games)
             if (
