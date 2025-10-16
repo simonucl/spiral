@@ -42,23 +42,23 @@ python train_spiral.py \
     --eval_split all \
     --gamma 1 \
     --gpus 8 \
-    --gradient-checkpointing \
     --num_samples 1 \
-    --rollout_batch_size 128 \
+    --rollout_batch_size 32 \
     --dump_game_state_every 1 \
     --num_envs 1 \
-    --rollout_batch_size_per_device 16 \
-    --pi_buffer_maxlen_per_device 16 \
-    --pretrain Qwen/Qwen3-32B \
+    --rollout_batch_size_per_device 4 \
+    --pi_buffer_maxlen_per_device 4 \
+    --pretrain Qwen/Qwen3-30B-A3B-Base \
     --prompt_template qwen3 \
     --enable_prefix_caching \
+    --gradient-checkpointing \
     --eval_prompt_template qwen3_general \
     --collocate \
     --vllm_sleep \
     --vllm_gpu_ratio 0.65 \
-    --num_gpus_per_actor 2 \
+    --num_gpus_per_actor 4 \
     --rnd-seed \
-    --learning_rate 0.000001 \
+    --learning_rate 0.0001 \
     --lr_scheduler constant \
     --lr_warmup_ratio 0 \
     --num_ppo_epochs 2 \
@@ -80,9 +80,5 @@ python train_spiral.py \
     --max_save_num 30 \
     --debug \
     --use-wb \
-    --wb-run-name ${username}-spiral-qwen3-32b-multi-env \
-    --zero_stage 3 \
-    --ref_offload \
-    --adam_offload \
-    --no-use_fused_lm_head \
+    --wb-run-name ${username}-spiral-qwen3-30b-a3b-multi-env \
     --wb_project oat-self-play
