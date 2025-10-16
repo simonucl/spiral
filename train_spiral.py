@@ -76,7 +76,7 @@ class SelfPlayArgs(PPOArgs):
     filter_zero_adv: bool = (
         True  # Make gradient less noisy by filtering zero-gradient trajectories
     )
-    filter_draw: bool = True  # Filter out draw games
+    filter_draw: bool = False  # Filter out draw games
     max_draw_retries: int = 5  # Maximum number of retries when filtering draws
     use_role_baseline: bool = True  # Use role baseline for reward shaping
     role_baseline_ema_gamma: float = 0.95
