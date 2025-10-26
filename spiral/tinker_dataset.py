@@ -129,28 +129,32 @@ class SpiralRLDatasetBuilder(RLDatasetBuilder):
     max_draw_retries: int = 5
     use_role_baseline: bool = True
     role_baseline_ema_gamma: float = 0.95
+    use_intermediate_rewards: bool = True  # Whether to distribute final reward to all turns
+    gamma: float = 1.0  # Discount factor for intermediate rewards
 
     # Evaluation settings
-    eval_env_ids: list[str] | None = None
-    eval_use_llm_obs_wrappers: list[bool] | None = None
+    # Use munger to default to training envs if not specified
+    eval_env_ids: list[str] | None = chz.field(
+        default=None,
+        munger=lambda self, val: val if val is not None else self.env_ids
+    )
+    eval_use_llm_obs_wrappers: list[bool] | None = chz.field(
+        default=None,
+        munger=lambda self, val: val if val is not None else self.use_llm_obs_wrappers
+    )
     eval_opponent_names: list[str] = chz.field(default_factory=lambda: ["random"])
 
     # Tinker settings
     base_url: str | None = None
 
-    def __post_init__(self):
-        """Validate configuration."""
+    @chz.validate
+    def _validate_env_wrapper_length(self):
+        """Validate that env_ids and use_llm_obs_wrappers have same length."""
         if len(self.env_ids) != len(self.use_llm_obs_wrappers):
             raise ValueError(
                 f"Length mismatch: {len(self.env_ids)} env_ids but "
                 f"{len(self.use_llm_obs_wrappers)} use_llm_obs_wrappers"
             )
-
-        # Default eval envs to training envs
-        if self.eval_env_ids is None:
-            self.eval_env_ids = self.env_ids
-        if self.eval_use_llm_obs_wrappers is None:
-            self.eval_use_llm_obs_wrappers = self.use_llm_obs_wrappers
 
     def _create_env_group_builder(
         self,
@@ -188,6 +192,8 @@ class SpiralRLDatasetBuilder(RLDatasetBuilder):
             max_draw_retries=self.max_draw_retries,
             use_role_baseline=self.use_role_baseline,
             role_baseline_ema_gamma=self.role_baseline_ema_gamma,
+            use_intermediate_rewards=self.use_intermediate_rewards,
+            gamma=self.gamma,
             use_llm_obs_wrapper=use_llm_obs_wrapper,
         )
 

@@ -17,7 +17,7 @@
 import asyncio
 import logging
 from dataclasses import dataclass, field
-from typing import ClassVar, Sequence
+from typing import Any, ClassVar, Sequence
 
 import textarena as ta
 from tinker import types
@@ -111,7 +111,7 @@ class SpiralTwoPlayerEnv(Env):
     coordinator: TwoPlayerCoordinator
     self_play: bool
     renderer: SpiralRenderer
-    opponent_policy: any | None  # MessageCompleter or RandomAgent
+    opponent_policy: Any | None  # MessageCompleter or RandomAgent
 
     def __post_init__(self):
         assert self.self_play == (
@@ -212,9 +212,13 @@ class SpiralTwoPlayerEnv(Env):
 
     def compute_reward(self) -> float:
         """Compute reward for this player."""
-        # Illegal move penalty
+        # Illegal move penalty for this player
         if self.coordinator.illegal_player_id == self.player_id:
             return ILLEGAL_MOVE_REWARD
+
+        # Opponent made illegal move - this player wins
+        if self.coordinator.illegal_player_id is not None:
+            return 0.5
 
         # Game rewards
         if self.coordinator.rewards:
@@ -248,7 +252,7 @@ class SpiralTwoPlayerEnvGroupBuilder(EnvGroupBuilder):
     renderer: SpiralRenderer
     num_envs: int = 2
     self_play: bool = True
-    opponent_policy: any | None = None  # MessageCompleter or RandomAgent
+    opponent_policy: Any | None = None  # MessageCompleter or RandomAgent
 
     # SPIRAL-specific settings
     filter_draw: bool = True
@@ -256,6 +260,8 @@ class SpiralTwoPlayerEnvGroupBuilder(EnvGroupBuilder):
     use_role_baseline: bool = True
     role_baseline_ema_gamma: float = 0.95
     use_llm_obs_wrapper: bool = True
+    use_intermediate_rewards: bool = True  # Whether to distribute final reward to all turns
+    gamma: float = 1.0  # Discount factor for intermediate rewards
 
     # Role baselines (shared across all instances for same env)
     # We use a class variable to share state
@@ -323,8 +329,12 @@ class SpiralTwoPlayerEnvGroupBuilder(EnvGroupBuilder):
         Implements Role-conditioned Advantage Estimation (RAE) by subtracting
         role-specific baselines from the rewards.
 
+        Note: Intermediate reward discounting (gamma < 1.0) is not yet implemented.
+        With the default gamma=1.0, sparse rewards at episode end are equivalent
+        to distributing the full final reward to all turns.
+
         Args:
-            trajectory_group: List of trajectories for the group
+            trajectory_group: List of trajectories for the group, per role (player 0, player 1)
 
         Returns:
             List of (adjusted_reward, metrics) tuples

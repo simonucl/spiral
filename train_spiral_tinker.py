@@ -27,28 +27,28 @@ from spiral.tinker_dataset import SpiralRLDatasetBuilder
 from spiral.tinker_train import create_spiral_train_loop
 
 logger = logging.getLogger(__name__)
-
+logging.basicConfig(level=logging.INFO)
 
 @chz.chz
 class CLIConfig:
     """Command-line configuration for SPIRAL training."""
 
     # Model settings
-    model_name: str = "Qwen/Qwen3-4B-Base"
+    model_name: str = "Qwen/Qwen3-8B-Base"
     renderer_name: str = "qwen3"
     lora_rank: int = 32
 
     # Environment settings
-    env_ids: list[str] = chz.field(default_factory=lambda: ["KuhnPoker-v1"])
-    use_llm_obs_wrappers: list[bool] = chz.field(default_factory=lambda: [True])
+    env_ids: list[str] = chz.field(default_factory=lambda: ["KuhnPoker-v1"]) # Format: "[env1, env2, ...]"
+    use_llm_obs_wrappers: list[bool] = chz.field(default_factory=lambda: [True]) # Format: "[true, false, ...]"
     template_overrides: str = ""  # Format: "env1:template1,env2:template2"
 
     # Training settings
     batch_size: int = 128
     num_train_datapoints: int = 51200  # 400 steps * 128 batch
     num_test_datapoints: int = 128
-    learning_rate: float = 1e-6
-    max_tokens: int = 4096
+    learning_rate: float = 1e-4
+    max_tokens: int = 8192
     num_substeps: int = 1
 
     # SPIRAL-specific settings
@@ -56,6 +56,9 @@ class CLIConfig:
     max_draw_retries: int = 5
     use_role_baseline: bool = True
     role_baseline_ema_gamma: float = 0.95
+    use_intermediate_rewards: bool = True  # Whether to discount earlier turns
+    gamma: float = 1.0  # Discount factor for turn-level rewards
+    filter_zero_adv: bool = False  # Whether to filter turns with zero advantage
 
     # Evaluation settings
     eval_env_ids: str = ""  # Comma-separated, defaults to env_ids
@@ -169,6 +172,8 @@ def build_config(cli_config: CLIConfig) -> train.Config:
         max_draw_retries=cli_config.max_draw_retries,
         use_role_baseline=cli_config.use_role_baseline,
         role_baseline_ema_gamma=cli_config.role_baseline_ema_gamma,
+        use_intermediate_rewards=cli_config.use_intermediate_rewards,
+        gamma=cli_config.gamma,
         eval_env_ids=eval_env_ids,
         eval_use_llm_obs_wrappers=eval_use_llm_obs_wrappers,
         eval_opponent_names=eval_opponent_names,

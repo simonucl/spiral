@@ -188,7 +188,7 @@ class SpiralRenderer(Renderer):
 
             patterns = self.action_parser(full_response)
             for pattern in patterns:
-                if pattern.search(extracted_action):
+                if pattern.match(extracted_action):
                     return extracted_action
             logger.warning(
                 f"Action '{extracted_action}' doesn't match any pattern for {self.env_id}"

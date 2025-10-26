@@ -37,6 +37,7 @@ from tinker_cookbook.utils.trace import scope
 
 from spiral.tinker_env import SpiralTwoPlayerEnvGroupBuilder
 from spiral.tinker_rollouts import do_group_rollout_with_draw_retry
+from spiral.tinker_train_custom import do_spiral_train_step
 
 logger = logging.getLogger(__name__)
 
@@ -136,7 +137,7 @@ async def do_sync_training_spiral(
         # Get batch and sample trajectories
         env_group_builders_P = dataset.get_batch(i_batch)
         with timed("sample", metrics):
-            trajectory_groups_P = await asyncio.gather(
+            trajectory_groups_P: list[TrajectoryGroup] = await asyncio.gather(
                 *[
                     asyncio.create_task(
                         do_group_rollout_and_filter_constant_reward(
@@ -150,22 +151,28 @@ async def do_sync_training_spiral(
                     for i, builder in enumerate(env_group_builders_P)
                 ],
             )
-        trajectory_groups_P = [
-            trajectory_group
-            for trajectory_group in trajectory_groups_P
-            if trajectory_group is not None
-        ]
 
-        # Train step
-        sampling_client, train_step_metrics = await train.do_train_step_and_get_sampling_client(
+        logger.info(f"Training step {i_batch} with {len(trajectory_groups_P)} trajectory groups")
+
+        # Train step - use custom SPIRAL training step for RAE
+        train_step_metrics = await do_spiral_train_step(
             cfg,
             i_batch,
             training_client,
-            service_client,
             tokenizer,
             env_group_builders_P,
             trajectory_groups_P,
         )
+
+        # Save checkpoint and get new sampling client
+        if (i_batch + 1) % cfg.save_every == 0:
+            with timed("save_checkpoint", train_step_metrics):
+                sampling_client, _ = await train.save_checkpoint_and_get_sampling_client(
+                    training_client, i_batch + 1, cfg.log_path, cfg.save_every
+                )
+        else:
+            # Just get updated sampling client without saving
+            sampling_client = training_client.get_sampling_client()
 
         # Log metrics
         metrics.update(train_step_metrics)
@@ -204,6 +211,7 @@ async def create_spiral_train_loop(cfg: train.Config):
         cfg.model_name, rank=cfg.lora_rank
     )
 
+    # Resume from checkpoint if available
     load_state_path: str | None = (
         resume_info["state_path"] if resume_info else cfg.load_checkpoint_path
     )
