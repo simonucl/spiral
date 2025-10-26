@@ -26,6 +26,7 @@ from spiral.template import TEMPLATE_FACTORY
 from spiral.utils import extract_boxed_answer
 
 logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
 
 INVALID_ACTION = "[｜INVALID_ACTION｜]"
 
@@ -113,7 +114,7 @@ class SpiralRenderer(Renderer):
         # Encode to tokens
         tokens = self.tokenizer.encode(formatted_prompt, add_special_tokens=True)
 
-        return tinker.ModelInput(tokens=tokens)
+        return tinker.ModelInput.from_ints(tokens)
 
     def get_stop_sequences(self) -> list[str] | list[int]:
         """
@@ -125,7 +126,7 @@ class SpiralRenderer(Renderer):
         Returns:
             List of stop sequences (as strings)
         """
-        return ["]\n"]
+        return []
 
     def parse_response(self, response: list[int]) -> tuple[Message, bool]:
         """
@@ -145,14 +146,16 @@ class SpiralRenderer(Renderer):
         # Extract action from \boxed{}
         extracted_action = extract_boxed_answer(response_text)
 
+        logger.info(f"Extracted action: {extracted_action}")
         # Validate action
         if extracted_action is None:
             # No boxed content found
-            logger.warning(f"No \\boxed{{}} found in response: {response_text[:100]}")
+            logger.warning(f"No \\boxed{{}} found in response: {response_text[-100:]}")
             action_text = INVALID_ACTION
         else:
             # Validate against action space if parser is available
-            action_text = self._validate_action(extracted_action, response_text)
+            # action_text = self._validate_action(extracted_action, response_text)
+            action_text = extracted_action
 
         # Create message
         message: Message = {"role": "assistant", "content": action_text}
@@ -207,7 +210,7 @@ class SpiralRenderer(Renderer):
                     return extracted_action
                 else:
                     logger.warning(
-                        f"Action '{extracted_action}' not in valid actions for {self.env_id}"
+                        f"Action '{extracted_action}' not in valid actions for {self.env_id}, valid actions: {valid_actions}"
                     )
                     return INVALID_ACTION
             except Exception as e:

@@ -131,9 +131,12 @@ class SpiralTwoPlayerEnv(Env):
                 await self.opponent_step()
 
     async def initial_observation(self) -> tuple[Observation, StopCondition]:
-        if self.player_id != 0:
+        # Check if it's actually our turn by looking at the shared env
+        current_player_id, _ = self.coordinator.shared_env.get_observation()
+        if current_player_id != self.player_id:
             await self.wait_for_turn()
-        return self.get_observation(), self.stop_condition
+        obs = self.get_observation()
+        return obs, self.stop_condition
 
     async def opponent_step(self) -> None:
         """When not self_play, the opponent policy takes a step on the shared environment"""
@@ -233,7 +236,7 @@ class SpiralTwoPlayerEnv(Env):
 
         current_player_id, observation_str = self.coordinator.shared_env.get_observation()
         assert isinstance(current_player_id, int) and isinstance(observation_str, str)
-        assert current_player_id == self.player_id, (
+        assert current_player_id == (self.player_id), (
             f"Observation should be for the current player, obs: {observation_str}, "
             f"current_player_id: {current_player_id}, player_id: {self.player_id}"
         )

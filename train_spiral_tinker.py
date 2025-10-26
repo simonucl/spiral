@@ -140,7 +140,7 @@ def build_config(cli_config: CLIConfig) -> train.Config:
 
     # Create run name
     date_and_time = datetime.now().strftime("%Y-%m-%d-%H-%M")
-    env_str = "+".join([env.replace("-v0", "").replace("-v1", "") for env in cli_config.env_ids])
+    env_str = "+".join([env.replace("-v0", "").replace("-v1", "").replace("-v2", "") for env in cli_config.env_ids])
     run_name = (
         f"{cli_config.model_name.split('/')[-1]}-{env_str}-"
         f"{cli_config.batch_size}batch-{cli_config.learning_rate}lr-{date_and_time}"
@@ -229,6 +229,8 @@ def main():
     logger.info("=" * 80)
     logger.info(f"Model: {config.model_name}")
     logger.info(f"Environments: {cli_config.env_ids}")
+    logger.info(f"Type of env_ids: {type(cli_config.env_ids)}")
+    logger.info(f"Length of env_ids: {len(cli_config.env_ids)}")
     logger.info(f"Batch size: {cli_config.batch_size}")
     logger.info(f"Learning rate: {cli_config.learning_rate}")
     logger.info(f"Max tokens: {cli_config.max_tokens}")

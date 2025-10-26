@@ -27,7 +27,7 @@ from tinker_cookbook.tokenizer_utils import Tokenizer
 from tinker_cookbook.utils.misc_utils import timed
 
 logger = logging.getLogger(__name__)
-
+logger.setLevel(logging.INFO)
 
 async def do_spiral_train_step(
     cfg: Any,
