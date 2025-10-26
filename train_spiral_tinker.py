@@ -1,0 +1,245 @@
+# Copyright 2025 SPIRAL Team. All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+"""SPIRAL training script using Tinker framework."""
+
+import asyncio
+import logging
+from datetime import datetime
+
+import chz
+from tinker_cookbook import cli_utils
+from tinker_cookbook.rl import train
+
+# Import SPIRAL custom train loop with draw retry
+from spiral.tinker_dataset import SpiralRLDatasetBuilder
+from spiral.tinker_train import create_spiral_train_loop
+
+logger = logging.getLogger(__name__)
+
+
+@chz.chz
+class CLIConfig:
+    """Command-line configuration for SPIRAL training."""
+
+    # Model settings
+    model_name: str = "Qwen/Qwen3-4B-Base"
+    renderer_name: str = "qwen3"
+    lora_rank: int = 32
+
+    # Environment settings
+    env_ids: list[str] = chz.field(default_factory=lambda: ["KuhnPoker-v1"])
+    use_llm_obs_wrappers: list[bool] = chz.field(default_factory=lambda: [True])
+    template_overrides: str = ""  # Format: "env1:template1,env2:template2"
+
+    # Training settings
+    batch_size: int = 128
+    num_train_datapoints: int = 51200  # 400 steps * 128 batch
+    num_test_datapoints: int = 128
+    learning_rate: float = 1e-6
+    max_tokens: int = 4096
+    num_substeps: int = 1
+
+    # SPIRAL-specific settings
+    filter_draw: bool = True
+    max_draw_retries: int = 5
+    use_role_baseline: bool = True
+    role_baseline_ema_gamma: float = 0.95
+
+    # Evaluation settings
+    eval_env_ids: str = ""  # Comma-separated, defaults to env_ids
+    eval_use_llm_obs_wrappers: str = ""  # Comma-separated "true,false,true"
+    eval_opponent_names: str = "random"  # Comma-separated
+    eval_every: int = 16
+    save_every: int = 20
+    compute_post_kl: bool = False
+
+    # Loss function
+    loss_fn: str = "importance_sampling"  # or "ppo"
+
+    # Logging
+    wandb_project: str | None = "spiral"
+    wandb_name: str | None = None
+    log_path: str | None = None
+
+    # Tinker service
+    base_url: str | None = None
+
+    # Advanced: streaming minibatch (optional)
+    use_streaming: bool = False
+    num_minibatches: int = 4
+
+
+def parse_template_overrides(override_str: str) -> dict[str, str]:
+    """Parse template overrides from string format 'env1:template1,env2:template2'."""
+    if not override_str:
+        return {}
+
+    overrides = {}
+    for pair in override_str.split(","):
+        if ":" in pair:
+            env, template = pair.split(":")
+            overrides[env.strip()] = template.strip()
+    return overrides
+
+
+def parse_eval_env_ids(eval_env_str: str, default_env_ids: list[str]) -> list[str]:
+    """Parse eval env IDs from comma-separated string."""
+    if not eval_env_str:
+        return default_env_ids
+    return [env.strip() for env in eval_env_str.split(",")]
+
+
+def parse_eval_llm_obs_wrappers(
+    wrapper_str: str, default_wrappers: list[bool]
+) -> list[bool]:
+    """Parse eval LLM obs wrappers from comma-separated string of 'true'/'false'."""
+    if not wrapper_str:
+        return default_wrappers
+    return [w.strip().lower() == "true" for w in wrapper_str.split(",")]
+
+
+def parse_opponent_names(opponent_str: str) -> list[str]:
+    """Parse opponent names from comma-separated string."""
+    return [name.strip() for name in opponent_str.split(",")]
+
+
+def build_config(cli_config: CLIConfig) -> train.Config:
+    """
+    Build Tinker training config from CLI config.
+
+    Args:
+        cli_config: CLI configuration
+
+    Returns:
+        Tinker train.Config
+    """
+    # Parse template overrides
+    template_overrides = parse_template_overrides(cli_config.template_overrides)
+
+    # Parse evaluation settings
+    eval_env_ids = parse_eval_env_ids(cli_config.eval_env_ids, cli_config.env_ids)
+    eval_use_llm_obs_wrappers = parse_eval_llm_obs_wrappers(
+        cli_config.eval_use_llm_obs_wrappers, cli_config.use_llm_obs_wrappers
+    )
+    eval_opponent_names = parse_opponent_names(cli_config.eval_opponent_names)
+
+    # Create run name
+    date_and_time = datetime.now().strftime("%Y-%m-%d-%H-%M")
+    env_str = "+".join([env.replace("-v0", "").replace("-v1", "") for env in cli_config.env_ids])
+    run_name = (
+        f"{cli_config.model_name.split('/')[-1]}-{env_str}-"
+        f"{cli_config.batch_size}batch-{cli_config.learning_rate}lr-{date_and_time}"
+    )
+
+    # Set log path
+    if cli_config.log_path is not None:
+        log_path = cli_config.log_path
+    else:
+        log_path = f"/tmp/spiral-tinker/{run_name}"
+
+    # Set wandb name
+    if cli_config.wandb_name is not None:
+        wandb_name = cli_config.wandb_name
+    else:
+        wandb_name = run_name
+
+    # Create dataset builder
+    dataset_builder = SpiralRLDatasetBuilder(
+        batch_size=cli_config.batch_size,
+        num_train_datapoints=cli_config.num_train_datapoints,
+        num_test_datapoints=cli_config.num_test_datapoints,
+        model_name=cli_config.model_name,
+        renderer_name=cli_config.renderer_name,
+        env_ids=cli_config.env_ids,
+        use_llm_obs_wrappers=cli_config.use_llm_obs_wrappers,
+        template_overrides=template_overrides,
+        filter_draw=cli_config.filter_draw,
+        max_draw_retries=cli_config.max_draw_retries,
+        use_role_baseline=cli_config.use_role_baseline,
+        role_baseline_ema_gamma=cli_config.role_baseline_ema_gamma,
+        eval_env_ids=eval_env_ids,
+        eval_use_llm_obs_wrappers=eval_use_llm_obs_wrappers,
+        eval_opponent_names=eval_opponent_names,
+        base_url=cli_config.base_url,
+    )
+
+    # Create streaming config if enabled
+    stream_minibatch_config = None
+    if cli_config.use_streaming:
+        stream_minibatch_config = train.StreamMinibatchConfig(
+            groups_per_batch=cli_config.batch_size // 2,  # Each group has 2 envs
+            num_minibatches=cli_config.num_minibatches,
+        )
+        logger.info(
+            f"Enabled streaming minibatch with {cli_config.num_minibatches} minibatches"
+        )
+
+    # Create training config
+    config = train.Config(
+        model_name=cli_config.model_name,
+        log_path=log_path,
+        dataset_builder=dataset_builder,
+        learning_rate=cli_config.learning_rate,
+        max_tokens=cli_config.max_tokens,
+        lora_rank=cli_config.lora_rank,
+        loss_fn=cli_config.loss_fn,  # type: ignore
+        num_substeps=cli_config.num_substeps,
+        compute_post_kl=cli_config.compute_post_kl,
+        eval_every=cli_config.eval_every,
+        save_every=cli_config.save_every,
+        wandb_project=cli_config.wandb_project,
+        wandb_name=wandb_name,
+        base_url=cli_config.base_url,
+        stream_minibatch_config=stream_minibatch_config,
+        # TODO: Add custom evaluators
+        # evaluator_builders=[],
+    )
+
+    return config
+
+
+def main():
+    """Main entry point for SPIRAL training."""
+    # Parse CLI config
+    cli_config = chz.entrypoint(CLIConfig)
+
+    # Build training config
+    config = build_config(cli_config)
+
+    # Print configuration
+    logger.info("=" * 80)
+    logger.info("SPIRAL Training Configuration")
+    logger.info("=" * 80)
+    logger.info(f"Model: {config.model_name}")
+    logger.info(f"Environments: {cli_config.env_ids}")
+    logger.info(f"Batch size: {cli_config.batch_size}")
+    logger.info(f"Learning rate: {cli_config.learning_rate}")
+    logger.info(f"Max tokens: {cli_config.max_tokens}")
+    logger.info(f"Draw filtering: {cli_config.filter_draw} (max retries: {cli_config.max_draw_retries})")
+    logger.info(f"Role baseline (RAE): {cli_config.use_role_baseline}")
+    logger.info(f"Loss function: {cli_config.loss_fn}")
+    logger.info(f"Streaming minibatch: {cli_config.use_streaming}")
+    logger.info(f"Log path: {config.log_path}")
+    logger.info("=" * 80)
+
+    # Check log dir
+    cli_utils.check_log_dir(config.log_path, behavior_if_exists="ask")
+
+    # Run training with custom SPIRAL loop (includes draw retry)
+    asyncio.run(create_spiral_train_loop(config))
+
+
+if __name__ == "__main__":
+    main()
