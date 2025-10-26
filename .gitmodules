@@ -1,0 +1,3 @@
+[submodule "tinker-cookbook"]
+	path = tinker-cookbook
+	url = ./tinker-cookbook
