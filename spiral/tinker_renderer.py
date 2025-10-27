@@ -126,7 +126,7 @@ class SpiralRenderer(Renderer):
         Returns:
             List of stop sequences (as strings)
         """
-        return []
+        return ["]\n"]
 
     def parse_response(self, response: list[int]) -> tuple[Message, bool]:
         """

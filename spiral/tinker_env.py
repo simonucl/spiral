@@ -20,7 +20,7 @@ from dataclasses import dataclass, field
 from typing import Any, ClassVar, Sequence
 
 import textarena as ta
-from tinker import types
+from tinker import ModelInput, types
 from tinker_cookbook.completers import StopCondition
 from tinker_cookbook.rl.types import (
     Action,
@@ -108,6 +108,7 @@ class SpiralTwoPlayerEnv(Env):
     """Two player TextArena environment for SPIRAL."""
 
     player_id: int  # 0 or 1
+    env_id: str
     coordinator: TwoPlayerCoordinator
     self_play: bool
     renderer: SpiralRenderer
@@ -136,6 +137,7 @@ class SpiralTwoPlayerEnv(Env):
         if current_player_id != self.player_id:
             await self.wait_for_turn()
         obs = self.get_observation()
+        assert isinstance(obs, ModelInput) and len(obs.chunks) > 0, f"Invalid observation: {obs} with env_id: {self.env_id} with player_id: {self.player_id}"
         return obs, self.stop_condition
 
     async def opponent_step(self) -> None:
@@ -184,7 +186,7 @@ class SpiralTwoPlayerEnv(Env):
             return StepResult(
                 reward=ILLEGAL_MOVE_REWARD,
                 episode_done=True,
-                next_observation=types.ModelInput.empty(),
+                next_observation=ModelInput.empty(),
                 next_stop_condition=self.stop_condition,
                 metrics={"invalid_action": 1},
             )
@@ -319,6 +321,7 @@ class SpiralTwoPlayerEnvGroupBuilder(EnvGroupBuilder):
                     renderer=self.renderer,
                     self_play=self.self_play,
                     opponent_policy=self.opponent_policy,
+                    env_id=self.env_id,
                 )
                 for i in range(2)
             ]

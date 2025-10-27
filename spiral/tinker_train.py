@@ -18,6 +18,7 @@ import asyncio
 import logging
 import time
 from typing import Any
+from tqdm.asyncio import tqdm
 
 import tinker
 from tinker_cookbook import checkpoint_utils
@@ -76,8 +77,8 @@ async def do_group_rollout_and_filter_constant_reward(
 
     # Remove if all trajectories have the same reward
     trajectory_groups = [trajectory_group]
-    if do_remove_constant_reward_groups:
-        trajectory_groups = remove_constant_reward_groups(trajectory_groups)
+    # if do_remove_constant_reward_groups:
+    #     trajectory_groups = remove_constant_reward_groups(trajectory_groups)
     if len(trajectory_groups) == 0:
         return None
     return trajectory_groups[0]
@@ -127,17 +128,17 @@ async def do_sync_training_spiral(
         }
         t_start = time.time()
 
-        # Run evaluations
-        if cfg.eval_every > 0 and i_batch % cfg.eval_every == 0:
-            with timed("run_evals", metrics):
-                for evaluator in evaluators:
-                    eval_metrics = await evaluator(sampling_client)
-                    metrics.update({f"test/{k}": v for k, v in eval_metrics.items()})
+        # # Run evaluations
+        # if cfg.eval_every > 0 and i_batch % cfg.eval_every == 0:
+        #     with timed("run_evals", metrics):
+        #         for evaluator in evaluators:
+        #             eval_metrics = await evaluator(sampling_client)
+        #             metrics.update({f"test/{k}": v for k, v in eval_metrics.items()})
 
         # Get batch and sample trajectories
         env_group_builders_P = dataset.get_batch(i_batch)
         with timed("sample", metrics):
-            trajectory_groups_P: list[TrajectoryGroup] = await asyncio.gather(
+            trajectory_groups_P: list[TrajectoryGroup] = await tqdm.gather(
                 *[
                     asyncio.create_task(
                         do_group_rollout_and_filter_constant_reward(
@@ -150,6 +151,7 @@ async def do_sync_training_spiral(
                     )
                     for i, builder in enumerate(env_group_builders_P)
                 ],
+                desc=f"Batch {i_batch} rollouts",
             )
 
         logger.info(f"Training step {i_batch} with {len(trajectory_groups_P)} trajectory groups")
