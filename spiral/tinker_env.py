@@ -133,11 +133,11 @@ class SpiralTwoPlayerEnv(Env):
 
     async def initial_observation(self) -> tuple[Observation, StopCondition]:
         # Check if it's actually our turn by looking at the shared env
-        current_player_id, _ = self.coordinator.shared_env.get_observation()
-        if current_player_id != self.player_id:
-            await self.wait_for_turn()
+        if not self.coordinator.game_done:
+            current_player_id, _ = self.coordinator.shared_env.get_observation()
+            if current_player_id != self.player_id:
+                await self.wait_for_turn()
         obs = self.get_observation()
-        assert isinstance(obs, ModelInput) and len(obs.chunks) > 0, f"Invalid observation: {obs} with env_id: {self.env_id} with player_id: {self.player_id}"
         return obs, self.stop_condition
 
     async def opponent_step(self) -> None:
@@ -180,9 +180,10 @@ class SpiralTwoPlayerEnv(Env):
 
         # Check for invalid action
         if action_text == INVALID_ACTION:
-            # Mark this player as making an illegal move
-            self.coordinator.illegal_player_id = self.player_id
-            await self.coordinator.wait_across_env(self.player_id)
+            # Mark this player as making an illegal move and notify opponent
+            async with self.coordinator.condition:
+                self.coordinator.illegal_player_id = self.player_id
+                self.coordinator.condition.notify_all()
             return StepResult(
                 reward=ILLEGAL_MOVE_REWARD,
                 episode_done=True,
@@ -206,9 +207,9 @@ class SpiralTwoPlayerEnv(Env):
         )
 
     def get_done_step(self) -> StepResult:
-        """Return a done step result."""
+        """Return a done step result with computed reward."""
         return StepResult(
-            reward=0.0,
+            reward=self.compute_reward(),
             episode_done=True,
             next_observation=types.ModelInput.empty(),
             next_stop_condition=self.stop_condition,
@@ -233,17 +234,18 @@ class SpiralTwoPlayerEnv(Env):
 
     def get_observation(self) -> types.ModelInput:
         """Get current observation for this player."""
-        if self.coordinator.game_done:
-            return types.ModelInput.empty()
-
         current_player_id, observation_str = self.coordinator.shared_env.get_observation()
-        assert isinstance(current_player_id, int) and isinstance(observation_str, str)
-        assert current_player_id == (self.player_id), (
-            f"Observation should be for the current player, obs: {observation_str}, "
-            f"current_player_id: {current_player_id}, player_id: {self.player_id}"
-        )
+
+        if not self.coordinator.game_done:
+            assert isinstance(current_player_id, int) and isinstance(observation_str, str)
+            assert current_player_id == self.player_id, (
+                f"Observation should be for the current player, obs: {observation_str}, "
+                f"current_player_id: {current_player_id}, player_id: {self.player_id}"
+            )
 
         # Use renderer to build generation prompt
+        # If game is done, observation_str might be stale, but that's ok
+        # since step() will return immediately with get_done_step()
         return self.renderer.build_generation_prompt(
             [{"role": "user", "content": observation_str}]
         )
