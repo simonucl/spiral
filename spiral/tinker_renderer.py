@@ -21,27 +21,29 @@ import tinker
 from tinker_cookbook.renderers import Message, Renderer, Role
 from tinker_cookbook.tokenizer_utils import Tokenizer
 
-from spiral.agents.utils import get_valid_action_parser
 from spiral.template import TEMPLATE_FACTORY
 from spiral.utils import extract_boxed_answer
 
 logger = logging.getLogger(__name__)
-logger.setLevel(logging.INFO)
 
 INVALID_ACTION = "[｜INVALID_ACTION｜]"
 
 
 class SpiralRenderer(Renderer):
     """
-    Renderer for SPIRAL that uses the template system from spiral/template.py
-    and validates actions against environment action spaces.
+    Renderer for SPIRAL that uses the template system from spiral/template.py.
+
+    This renderer is responsible for:
+    - Formatting observations into prompts using templates
+    - Parsing model responses to extract actions from \\boxed{}
+
+    Action validation is handled by the Environment, not the Renderer.
     """
 
     def __init__(
         self,
         tokenizer: Tokenizer,
         template_name: str,
-        env_id: str,
     ):
         """
         Initialize the SPIRAL renderer.
@@ -49,11 +51,9 @@ class SpiralRenderer(Renderer):
         Args:
             tokenizer: Tokenizer for encoding/decoding tokens
             template_name: Name of template from TEMPLATE_FACTORY
-            env_id: Environment ID for action validation
         """
         super().__init__(tokenizer)
         self.template_name = template_name
-        self.env_id = env_id
 
         # Get template function
         if template_name not in TEMPLATE_FACTORY:
@@ -64,15 +64,6 @@ class SpiralRenderer(Renderer):
         self.template_fn: Callable[[str, Optional[str]], str] = TEMPLATE_FACTORY[
             template_name
         ]
-
-        # Get action parser for validation
-        try:
-            self.action_parser = get_valid_action_parser(env_id)
-        except NotImplementedError:
-            logger.warning(
-                f"No action parser for {env_id}, will skip action validation"
-            )
-            self.action_parser = None
 
     def build_generation_prompt(
         self,
@@ -132,7 +123,8 @@ class SpiralRenderer(Renderer):
         """
         Parse a response from the model into a Message and done flag.
 
-        Extracts action from \\boxed{} and validates against action space.
+        Extracts action from \\boxed{} notation. Does NOT validate the action
+        against the game state - that's the Environment's responsibility.
 
         Args:
             response: List of token IDs from the model
@@ -146,15 +138,13 @@ class SpiralRenderer(Renderer):
         # Extract action from \boxed{}
         extracted_action = extract_boxed_answer(response_text)
 
-        logger.info(f"Extracted action: {extracted_action}")
-        # Validate action
         if extracted_action is None:
             # No boxed content found
-            logger.warning(f"No \\boxed{{}} found in response: {response_text[-100:]}")
+            logger.debug(f"No \\boxed{{}} found in response: {response_text[-100:]}")
             action_text = INVALID_ACTION
         else:
-            # Validate against action space if parser is available
-            # action_text = self._validate_action(extracted_action, response_text)
+            # Return extracted action without validation
+            # The Environment will validate it against the game state
             action_text = extracted_action
 
         # Create message
@@ -164,60 +154,6 @@ class SpiralRenderer(Renderer):
         is_done = True
 
         return message, is_done
-
-    def _validate_action(self, extracted_action: str, full_response: str) -> str:
-        """
-        Validate extracted action against environment action space.
-
-        Args:
-            extracted_action: Action extracted from \\boxed{}
-            full_response: Full response text (contains observation for validation)
-
-        Returns:
-            Validated action string or INVALID_ACTION
-        """
-        # If no action parser, accept as-is
-        if self.action_parser is None:
-            return extracted_action
-
-        # Special handling for different environment types
-        if self.env_id in ["DontSayIt-v0", "SimpleNegotiation-v1"]:
-            # These environments accept free-form chat, no validation needed
-            return extracted_action
-
-        elif self.env_id == "SimpleNegotiation-v2":
-            # This uses regex patterns for validation
-            import re
-
-            patterns = self.action_parser(full_response)
-            for pattern in patterns:
-                if pattern.match(extracted_action):
-                    return extracted_action
-            logger.warning(
-                f"Action '{extracted_action}' doesn't match any pattern for {self.env_id}"
-            )
-            return INVALID_ACTION
-
-        else:
-            # Standard validation: check if action is in valid action list
-            try:
-                # Extract observation from response to get valid actions
-                # This is a bit hacky - we need the observation to know valid actions
-                # In practice, the observation is in the prompt, not the response
-                # So we'll just accept the action if it looks valid
-                valid_actions = self.action_parser(full_response)
-                if extracted_action in valid_actions:
-                    return extracted_action
-                else:
-                    logger.warning(
-                        f"Action '{extracted_action}' not in valid actions for {self.env_id}, valid actions: {valid_actions}"
-                    )
-                    return INVALID_ACTION
-            except Exception as e:
-                logger.warning(
-                    f"Error validating action '{extracted_action}': {e}, accepting as-is"
-                )
-                return extracted_action
 
     def build_supervised_example(
         self, messages: list[Message], train_on_what: str = "last_assistant_message"
@@ -230,7 +166,7 @@ class SpiralRenderer(Renderer):
 
 
 def get_spiral_renderer(
-    model_name: str, template_name: str, env_id: str
+    model_name: str, template_name: str
 ) -> SpiralRenderer:
     """
     Helper function to create a SPIRAL renderer.
@@ -238,7 +174,6 @@ def get_spiral_renderer(
     Args:
         model_name: Model name for tokenizer
         template_name: Template name from TEMPLATE_FACTORY
-        env_id: Environment ID
 
     Returns:
         Configured SpiralRenderer
@@ -246,4 +181,4 @@ def get_spiral_renderer(
     from tinker_cookbook.tokenizer_utils import get_tokenizer
 
     tokenizer = get_tokenizer(model_name)
-    return SpiralRenderer(tokenizer, template_name, env_id)
+    return SpiralRenderer(tokenizer, template_name)

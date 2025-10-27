@@ -179,7 +179,8 @@ class SpiralRLDatasetBuilder(RLDatasetBuilder):
         template_name = self.template_overrides.get(env_id, self.renderer_name)
 
         # Create renderer for this environment
-        renderer = get_spiral_renderer(self.model_name, template_name, env_id)
+        # Note: env_id is not passed to renderer - validation happens in Environment
+        renderer = get_spiral_renderer(self.model_name, template_name)
 
         # Create builder
         builder = SpiralTwoPlayerEnvGroupBuilder(

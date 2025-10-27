@@ -33,6 +33,7 @@ from tinker_cookbook.rl.types import (
 )
 
 from spiral.agents.random import RandomAgent
+from spiral.agents.utils import get_valid_action_parser
 from spiral.envs import make_env
 from spiral.tinker_renderer import INVALID_ACTION, SpiralRenderer
 from spiral.utils import EMA
@@ -115,6 +116,15 @@ class SpiralTwoPlayerEnv(Env):
             self.opponent_policy is None
         ), "If self_play is True, opponent_policy must be None"
 
+        # Initialize action parser for validation
+        try:
+            self.action_parser = get_valid_action_parser(self.env_id)
+        except NotImplementedError:
+            logger.info(
+                f"No action parser for {self.env_id}, will skip action validation"
+            )
+            self.action_parser = None
+
     @property
     def stop_condition(self) -> StopCondition:
         return self.renderer.get_stop_sequences()
@@ -170,9 +180,13 @@ class SpiralTwoPlayerEnv(Env):
             self.coordinator.current_player_id == self.player_id
         ), "Not the current player's turn"
 
-        # Parse action from tokens
+        # Parse action from tokens (extraction only, no validation)
         action_message, _ = self.renderer.parse_response(action)
         action_text = action_message["content"]
+
+        # Validate action against current game state
+        if action_text != INVALID_ACTION:
+            action_text = self._validate_action(action_text)
 
         # Check for invalid action
         if action_text == INVALID_ACTION:
@@ -201,6 +215,57 @@ class SpiralTwoPlayerEnv(Env):
             next_stop_condition=self.stop_condition,
             metrics={"invalid_action": 0},
         )
+
+    def _validate_action(self, extracted_action: str) -> str:
+        """
+        Validate extracted action against current game state.
+
+        Args:
+            extracted_action: Action extracted from \\boxed{}
+
+        Returns:
+            Validated action string or INVALID_ACTION
+        """
+        # If no action parser, accept as-is
+        if self.action_parser is None:
+            return extracted_action
+
+        # Get current observation from shared environment
+        _, observation_str = self.coordinator.shared_env.get_observation()
+
+        # Special handling for different environment types
+        if self.env_id in ["DontSayIt-v0", "SimpleNegotiation-v1"]:
+            # These environments accept free-form chat, no validation needed
+            return extracted_action
+
+        elif self.env_id == "SimpleNegotiation-v2":
+            # This uses regex patterns for validation
+            patterns = self.action_parser(observation_str)
+            for pattern in patterns:
+                if pattern.match(extracted_action):
+                    return extracted_action
+            logger.warning(
+                f"Action '{extracted_action}' doesn't match any pattern for {self.env_id}"
+            )
+            return INVALID_ACTION
+
+        else:
+            # Standard validation: check if action is in valid action list
+            try:
+                valid_actions = self.action_parser(observation_str)
+                if extracted_action in valid_actions:
+                    return extracted_action
+                else:
+                    logger.warning(
+                        f"Action '{extracted_action}' not in valid actions for {self.env_id}, "
+                        f"valid actions: {valid_actions}"
+                    )
+                    return INVALID_ACTION
+            except Exception as e:
+                logger.warning(
+                    f"Error validating action '{extracted_action}': {e}, accepting as-is"
+                )
+                return extracted_action
 
     def get_done_step(self) -> StepResult:
         """Return a done step result with computed reward."""
