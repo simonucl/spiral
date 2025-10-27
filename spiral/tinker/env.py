@@ -16,21 +16,14 @@
 
 import asyncio
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, ClassVar, Sequence
 
 import textarena as ta
 from tinker import ModelInput, types
 from tinker_cookbook.completers import StopCondition
-from tinker_cookbook.rl.types import (
-    Action,
-    Env,
-    EnvGroupBuilder,
-    Metrics,
-    Observation,
-    StepResult,
-    Trajectory,
-)
+from tinker_cookbook.rl.types import (Action, Env, EnvGroupBuilder, Metrics,
+                                      Observation, StepResult, Trajectory)
 
 from spiral.agents.random import RandomAgent
 from spiral.agents.utils import get_valid_action_parser
@@ -295,10 +288,14 @@ class SpiralTwoPlayerEnv(Env):
 
     def get_observation(self) -> types.ModelInput:
         """Get current observation for this player."""
-        current_player_id, observation_str = self.coordinator.shared_env.get_observation()
+        current_player_id, observation_str = (
+            self.coordinator.shared_env.get_observation()
+        )
 
         if not self.coordinator.game_done:
-            assert isinstance(current_player_id, int) and isinstance(observation_str, str)
+            assert isinstance(current_player_id, int) and isinstance(
+                observation_str, str
+            )
             assert current_player_id == self.player_id, (
                 f"Observation should be for the current player, obs: {observation_str}, "
                 f"current_player_id: {current_player_id}, player_id: {self.player_id}"
@@ -328,7 +325,9 @@ class SpiralTwoPlayerEnvGroupBuilder(EnvGroupBuilder):
     use_role_baseline: bool = True
     role_baseline_ema_gamma: float = 0.95
     use_llm_obs_wrapper: bool = True
-    use_intermediate_rewards: bool = True  # Whether to distribute final reward to all turns
+    use_intermediate_rewards: bool = (
+        True  # Whether to distribute final reward to all turns
+    )
     gamma: float = 1.0  # Discount factor for intermediate rewards
 
     # Role baselines (shared across all instances for same env)
@@ -353,7 +352,9 @@ class SpiralTwoPlayerEnvGroupBuilder(EnvGroupBuilder):
     async def make_envs(self) -> Sequence[Env]:
         """Create a group of environments sharing the same TextArena game."""
         if self.num_envs % 2 != 0:
-            raise ValueError("this env requires an even number of environments (players)")
+            raise ValueError(
+                "this env requires an even number of environments (players)"
+            )
 
         def _construct_coordinator() -> TwoPlayerCoordinator:
             """
@@ -375,7 +376,9 @@ class SpiralTwoPlayerEnvGroupBuilder(EnvGroupBuilder):
                 coordinators = [coordinator for _ in range(self.num_players)]
             else:
                 # if not self_play, we can just create a different coordinator for each environment
-                coordinators = [_construct_coordinator() for _ in range(self.num_players)]
+                coordinators = [
+                    _construct_coordinator() for _ in range(self.num_players)
+                ]
 
             envs += [
                 SpiralTwoPlayerEnv(
@@ -437,7 +440,11 @@ class SpiralTwoPlayerEnvGroupBuilder(EnvGroupBuilder):
                 }
             else:
                 adjusted_reward = raw_reward
-                metrics = {"role": player_id, "raw_reward": raw_reward, "trajectory_length": len(traj.transitions)}
+                metrics = {
+                    "role": player_id,
+                    "raw_reward": raw_reward,
+                    "trajectory_length": len(traj.transitions),
+                }
 
             results.append((adjusted_reward, metrics))
 

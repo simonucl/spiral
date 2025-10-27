@@ -16,19 +16,20 @@
 
 import logging
 import time
-from typing import Any, Sequence, List
+from typing import Any, List, Sequence
 
 import numpy as np
 import tinker
 import torch
-from tinker import TensorData, types
-from tinker_cookbook.rl.types import EnvGroupBuilder, TrajectoryGroup, Transition
+from tinker import AdamParams, TensorData, types
+from tinker_cookbook.rl.types import (EnvGroupBuilder, TrajectoryGroup,
+                                      Transition)
 from tinker_cookbook.tokenizer_utils import Tokenizer
 from tinker_cookbook.utils.misc_utils import timed
-from tinker import AdamParams
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
+
 
 async def do_spiral_train_step(
     cfg: Any,
@@ -78,13 +79,21 @@ async def do_spiral_train_step(
         for traj_group in trajectory_groups_P:
             player_rewards = traj_group.get_total_rewards()
             assert len(player_rewards) == 2, "Expected 2 player rewards"
-            for player_reward, trajectory in zip(player_rewards, traj_group.trajectories_G):
+            for player_reward, trajectory in zip(
+                player_rewards, traj_group.trajectories_G
+            ):
                 num_turns = len(trajectory.transitions)
                 for turn_idx, transition in enumerate(trajectory.transitions):
-                    transition.reward = player_reward * (cfg.gamma ** (num_turns - turn_idx - 1))
+                    transition.reward = player_reward * (
+                        cfg.gamma ** (num_turns - turn_idx - 1)
+                    )
 
                     # Filter zero rewards if configured
-                    if hasattr(cfg, 'filter_zero_adv') and cfg.filter_zero_adv and transition.reward == 0:
+                    if (
+                        hasattr(cfg, "filter_zero_adv")
+                        and cfg.filter_zero_adv
+                        and transition.reward == 0
+                    ):
                         continue
 
                     transitions.append(transition)
@@ -111,7 +120,9 @@ async def do_spiral_train_step(
             all_logprobs = [0.0] * ob_len + transition.ac.logprobs
 
             # Advantages: 0 for observation tokens, advantage value for action tokens
-            all_advantages = [0.0] * ob_len + [transition.reward] * (len(input_tokens) - ob_len)
+            all_advantages = [0.0] * ob_len + [transition.reward] * (
+                len(input_tokens) - ob_len
+            )
 
             assert (
                 len(input_tokens)
@@ -142,7 +153,9 @@ async def do_spiral_train_step(
             training_datums, loss_fn=cfg.loss_fn
         )
         optim_step_future = training_client.optim_step(
-            adam_params=AdamParams(learning_rate=cfg.learning_rate, beta1=0.9, beta2=0.95, eps=1e-8)
+            adam_params=AdamParams(
+                learning_rate=cfg.learning_rate, beta1=0.9, beta2=0.95, eps=1e-8
+            )
         )
         fwd_bwd_result = fwd_bwd_future.result()
         _ = optim_step_future.result()
@@ -163,7 +176,7 @@ async def do_spiral_train_step(
 
             # Get training logprobs for action tokens
             train_logprobs = train_output["logprobs"].to_torch()[
-                -len(transition.ac.maybe_logprobs):
+                -len(transition.ac.maybe_logprobs) :
             ]
 
             act_token_diffs.append(sample_logprobs - train_logprobs)
@@ -171,7 +184,7 @@ async def do_spiral_train_step(
         if len(act_token_diffs) > 0:
             act_token_diffs = torch.cat(act_token_diffs)
             kl_sample_train_v1 = act_token_diffs.mean().item()
-            kl_sample_train_v2 = 0.5 * (act_token_diffs ** 2).mean().item()
+            kl_sample_train_v2 = 0.5 * (act_token_diffs**2).mean().item()
 
             metrics["sampler/token_entropy"] = (
                 -torch.tensor(act_token_logprobs).mean().item()

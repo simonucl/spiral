@@ -183,9 +183,7 @@ class SpiralRenderer(Renderer):
         raise NotImplementedError("SPIRAL uses RL, not supervised learning")
 
 
-def get_spiral_renderer(
-    model_name: str, template_name: str
-) -> SpiralRenderer:
+def get_spiral_renderer(model_name: str, template_name: str) -> SpiralRenderer:
     """
     Helper function to create a SPIRAL renderer.
 

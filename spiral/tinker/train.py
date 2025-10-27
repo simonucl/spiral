@@ -17,24 +17,18 @@
 import asyncio
 import logging
 import time
-from typing import Any
-from tqdm.asyncio import tqdm
 
 import tinker
 from tinker_cookbook import checkpoint_utils
 from tinker_cookbook.completers import TinkerTokenCompleter
 from tinker_cookbook.rl import train
-from tinker_cookbook.rl.data_processing import (
-    assemble_training_data,
-    compute_advantages,
-    remove_constant_reward_groups,
-)
-from tinker_cookbook.rl.metric_util import compute_trajectory_metrics
-from tinker_cookbook.rl.types import EnvGroupBuilder, RLDataset, TrajectoryGroup
+from tinker_cookbook.rl.types import (EnvGroupBuilder, RLDataset,
+                                      TrajectoryGroup)
 from tinker_cookbook.tokenizer_utils import Tokenizer
 from tinker_cookbook.utils import ml_log
-from tinker_cookbook.utils.misc_utils import safezip, timed
+from tinker_cookbook.utils.misc_utils import timed
 from tinker_cookbook.utils.trace import scope
+from tqdm.asyncio import tqdm
 
 from spiral.tinker.env import SpiralTwoPlayerEnvGroupBuilder
 from spiral.tinker.rollouts import do_group_rollout_with_draw_retry
@@ -123,9 +117,7 @@ async def do_sync_training_spiral(
             )
         else:
             sampling_path = (
-                training_client.save_weights_for_sampler(
-                    name=f"{i_batch + 1:06d}"
-                )
+                training_client.save_weights_for_sampler(name=f"{i_batch + 1:06d}")
                 .result()
                 .path
             )
@@ -166,7 +158,9 @@ async def do_sync_training_spiral(
                 desc=f"Batch {i_batch} rollouts",
             )
 
-        logger.info(f"Training step {i_batch} with {len(trajectory_groups_P)} trajectory groups")
+        logger.info(
+            f"Training step {i_batch} with {len(trajectory_groups_P)} trajectory groups"
+        )
 
         # Train step - use custom SPIRAL training step for RAE
         train_step_metrics = await do_spiral_train_step(
@@ -243,7 +237,9 @@ async def create_spiral_train_loop(cfg: train.Config):
     # Use our custom sync training with draw retry
     # Note: Async and streaming not yet supported with draw retry
     if cfg.async_config is not None:
-        raise NotImplementedError("Async training not yet supported with SPIRAL draw retry")
+        raise NotImplementedError(
+            "Async training not yet supported with SPIRAL draw retry"
+        )
     elif cfg.stream_minibatch_config is not None:
         raise NotImplementedError(
             "Streaming minibatch not yet supported with SPIRAL draw retry"

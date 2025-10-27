@@ -15,16 +15,16 @@
 """Tinker integration for SPIRAL self-play training."""
 
 from spiral.tinker.dataset import SpiralRLDatasetBuilder
-from spiral.tinker.env import (
-    ILLEGAL_MOVE_REWARD,
-    INVALID_ACTION,
-    SpiralTwoPlayerEnv,
-    SpiralTwoPlayerEnvGroupBuilder,
-    TwoPlayerCoordinator,
-)
+from spiral.tinker.env import (ILLEGAL_MOVE_REWARD, INVALID_ACTION,
+                               SpiralTwoPlayerEnv,
+                               SpiralTwoPlayerEnvGroupBuilder,
+                               TwoPlayerCoordinator)
 from spiral.tinker.renderer import SpiralRenderer, get_spiral_renderer
-from spiral.tinker.rollouts import do_group_rollout_with_draw_retry
-from spiral.tinker.train import create_spiral_train_loop, do_sync_training_spiral
+from spiral.tinker.rollouts import (do_group_rollout,
+                                    do_group_rollout_with_draw_retry,
+                                    do_single_rollout)
+from spiral.tinker.train import (create_spiral_train_loop,
+                                 do_sync_training_spiral)
 from spiral.tinker.train_custom import do_spiral_train_step
 
 __all__ = [
@@ -40,6 +40,8 @@ __all__ = [
     "SpiralRenderer",
     "get_spiral_renderer",
     # Rollouts
+    "do_single_rollout",
+    "do_group_rollout",
     "do_group_rollout_with_draw_retry",
     # Training
     "create_spiral_train_loop",

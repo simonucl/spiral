@@ -21,7 +21,8 @@ from typing import Sequence
 import chz
 import tinker
 from tinker_cookbook.completers import TinkerMessageCompleter
-from tinker_cookbook.rl.types import EnvGroupBuilder, RLDataset, RLDatasetBuilder
+from tinker_cookbook.rl.types import (EnvGroupBuilder, RLDataset,
+                                      RLDatasetBuilder)
 
 from spiral.agents.random import RandomAgent
 from spiral.tinker.env import SpiralTwoPlayerEnvGroupBuilder
@@ -63,9 +64,7 @@ class SpiralRLDataset(RLDataset):
         # Shuffle builders to avoid order bias
         if self.shuffle_envs and len(self.env_group_builders) > 1:
             random.shuffle(self.env_group_builders)
-            logger.info(
-                f"Shuffled {len(self.env_group_builders)} environment builders"
-            )
+            logger.info(f"Shuffled {len(self.env_group_builders)} environment builders")
 
     def get_batch(self, index: int) -> Sequence[EnvGroupBuilder]:
         """
@@ -129,18 +128,19 @@ class SpiralRLDatasetBuilder(RLDatasetBuilder):
     max_draw_retries: int = 5
     use_role_baseline: bool = True
     role_baseline_ema_gamma: float = 0.95
-    use_intermediate_rewards: bool = True  # Whether to distribute final reward to all turns
+    use_intermediate_rewards: bool = (
+        True  # Whether to distribute final reward to all turns
+    )
     gamma: float = 1.0  # Discount factor for intermediate rewards
 
     # Evaluation settings
     # Use munger to default to training envs if not specified
     eval_env_ids: list[str] | None = chz.field(
-        default=None,
-        munger=lambda self, val: val if val is not None else self.env_ids
+        default=None, munger=lambda self, val: val if val is not None else self.env_ids
     )
     eval_use_llm_obs_wrappers: list[bool] | None = chz.field(
         default=None,
-        munger=lambda self, val: val if val is not None else self.use_llm_obs_wrappers
+        munger=lambda self, val: val if val is not None else self.use_llm_obs_wrappers,
     )
     eval_opponent_names: list[str] = chz.field(default_factory=lambda: ["random"])
 
@@ -242,9 +242,7 @@ class SpiralRLDatasetBuilder(RLDatasetBuilder):
         """
         # Create training dataset (self-play)
         train_builders = []
-        for env_id, use_llm_obs_wrapper in zip(
-            self.env_ids, self.use_llm_obs_wrappers
-        ):
+        for env_id, use_llm_obs_wrapper in zip(self.env_ids, self.use_llm_obs_wrappers):
             builder = self._create_env_group_builder(
                 env_id=env_id,
                 use_llm_obs_wrapper=use_llm_obs_wrapper,
@@ -273,7 +271,9 @@ class SpiralRLDatasetBuilder(RLDatasetBuilder):
                 self.eval_env_ids, self.eval_use_llm_obs_wrappers
             ):
                 for opponent_name in self.eval_opponent_names:
-                    opponent_policy = self._create_opponent_policy(opponent_name, env_id)
+                    opponent_policy = self._create_opponent_policy(
+                        opponent_name, env_id
+                    )
                     builder = self._create_env_group_builder(
                         env_id=env_id,
                         use_llm_obs_wrapper=use_llm_obs_wrapper,
