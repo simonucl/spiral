@@ -25,6 +25,7 @@ from tinker import TensorData, types
 from tinker_cookbook.rl.types import EnvGroupBuilder, TrajectoryGroup, Transition
 from tinker_cookbook.tokenizer_utils import Tokenizer
 from tinker_cookbook.utils.misc_utils import timed
+from tinker import AdamParams
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -136,17 +137,15 @@ async def do_spiral_train_step(
     logger.info(f"Prepared {len(training_datums)} training datums")
 
     # Step 4: Training step (forward-backward + optimizer step)
-    with timed("train_forward_backward", metrics):
-        fwd_bwd_future = training_client.forward_backward_async(
+    with timed("train", metrics):
+        fwd_bwd_future = training_client.forward_backward(
             training_datums, loss_fn=cfg.loss_fn
         )
-        fwd_bwd_result = await fwd_bwd_future.result_async()
-
-    with timed("train_optim_step", metrics):
-        optim_step_future = training_client.optim_step_async(
-            learning_rate=cfg.learning_rate
+        optim_step_future = training_client.optim_step(
+            adam_params=AdamParams(learning_rate=cfg.learning_rate, beta1=0.9, beta2=0.95, eps=1e-8)
         )
-        _ = await optim_step_future.result_async()
+        fwd_bwd_result = fwd_bwd_future.result()
+        _ = optim_step_future.result()
 
     # Step 5: Compute metrics
     with timed("compute_metrics", metrics):

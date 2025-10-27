@@ -115,12 +115,24 @@ async def do_sync_training_spiral(
         ml_logger: Logger for metrics
         tokenizer: Tokenizer
     """
-    # Initial sampling client
-    sampling_client, _ = await train.save_checkpoint_and_get_sampling_client(
-        training_client, start_batch, cfg.log_path, cfg.save_every
-    )
-
     for i_batch in range(start_batch, end_batch):
+
+        if (i_batch + 1) % cfg.save_every == 0:
+            sampling_client, _ = await train.save_checkpoint_and_get_sampling_client(
+                training_client, i_batch + 1, cfg.log_path, cfg.save_every
+            )
+        else:
+            sampling_path = (
+                training_client.save_weights_for_sampler(
+                    name=f"{i_batch + 1:06d}"
+                )
+                .result()
+                .path
+            )
+            sampling_client = service_client.create_sampling_client(
+                model_path=sampling_path
+            )
+
         metrics = {
             "progress/batch": i_batch,
             "optim/lr": cfg.learning_rate,
@@ -165,16 +177,6 @@ async def do_sync_training_spiral(
             env_group_builders_P,
             trajectory_groups_P,
         )
-
-        # Save checkpoint and get new sampling client
-        if (i_batch + 1) % cfg.save_every == 0:
-            with timed("save_checkpoint", train_step_metrics):
-                sampling_client, _ = await train.save_checkpoint_and_get_sampling_client(
-                    training_client, i_batch + 1, cfg.log_path, cfg.save_every
-                )
-        else:
-            # Just get updated sampling client without saving
-            sampling_client = training_client.get_sampling_client()
 
         # Log metrics
         metrics.update(train_step_metrics)
