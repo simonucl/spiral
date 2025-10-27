@@ -25,7 +25,8 @@ from spiral.tinker.rollouts import (do_group_rollout,
                                     do_single_rollout)
 from spiral.tinker.train import (create_spiral_train_loop,
                                  do_sync_training_spiral)
-from spiral.tinker.train_custom import do_spiral_train_step
+from spiral.tinker.train_step import train_step
+from spiral.tinker.utils import compute_trajectory_metrics
 
 __all__ = [
     # Dataset
@@ -46,5 +47,7 @@ __all__ = [
     # Training
     "create_spiral_train_loop",
     "do_sync_training_spiral",
-    "do_spiral_train_step",
+    "train_step",
+    # Utils
+    "compute_trajectory_metrics",
 ]

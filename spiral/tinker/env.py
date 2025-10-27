@@ -47,6 +47,7 @@ class TwoPlayerCoordinator:
         self.condition = asyncio.Condition()
         self.illegal_player_id: int | None = None
         self.rewards: dict[int, float] = {}
+        self.turn_count: int = 0  # Track total turns in the game
 
     @property
     def state(self) -> ta.State:
@@ -79,6 +80,9 @@ class TwoPlayerCoordinator:
                 raise ValueError(
                     f"Not player {player_id}'s turn (current: {self.current_player_id})"
                 )
+
+            # Increment turn count before making the move
+            self.turn_count += 1
 
             done, _ = self.shared_env.step(move)
 
@@ -192,7 +196,12 @@ class SpiralTwoPlayerEnv(Env):
                 episode_done=True,
                 next_observation=ModelInput.empty(),
                 next_stop_condition=self.stop_condition,
-                metrics={"invalid_action": 1},
+                metrics={
+                    "invalid_action": 1,
+                    "player_id": self.player_id,
+                    "turn_number": self.coordinator.turn_count + 1,  # +1 because not yet incremented
+                    "game_length": self.coordinator.turn_count + 1,
+                },
             )
 
         # Make move
@@ -206,7 +215,12 @@ class SpiralTwoPlayerEnv(Env):
             episode_done=self.coordinator.game_done,
             next_observation=self.get_observation(),
             next_stop_condition=self.stop_condition,
-            metrics={"invalid_action": 0},
+            metrics={
+                "invalid_action": 0,
+                "player_id": self.player_id,
+                "turn_number": self.coordinator.turn_count,
+                "game_length": self.coordinator.turn_count if self.coordinator.game_done else 0,
+            },
         )
 
     def _validate_action(self, extracted_action: str) -> str:

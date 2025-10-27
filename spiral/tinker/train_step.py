@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Custom training step for SPIRAL with full control over advantage computation."""
+"""Training step implementation for SPIRAL with per-turn advantage computation."""
 
 import logging
 import time
@@ -27,11 +27,13 @@ from tinker_cookbook.rl.types import (EnvGroupBuilder, TrajectoryGroup,
 from tinker_cookbook.tokenizer_utils import Tokenizer
 from tinker_cookbook.utils.misc_utils import timed
 
+from spiral.tinker.utils import compute_trajectory_metrics
+
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
 
-async def do_spiral_train_step(
+async def train_step(
     cfg: Any,
     i_batch: int,
     training_client: tinker.TrainingClient,
@@ -206,6 +208,10 @@ async def do_spiral_train_step(
             metrics["train/std_advantage"] = np.std(advantages)
             metrics["train/max_advantage"] = np.max(advantages)
             metrics["train/min_advantage"] = np.min(advantages)
+
+        # Compute comprehensive trajectory metrics using utility function
+        trajectory_metrics = compute_trajectory_metrics(trajectory_groups_P, prefix="train")
+        metrics.update(trajectory_metrics)
 
     metrics["time/train_total"] = time.time() - t_start
 

@@ -32,7 +32,7 @@ from tqdm.asyncio import tqdm
 
 from spiral.tinker.env import SpiralTwoPlayerEnvGroupBuilder
 from spiral.tinker.rollouts import do_group_rollout_with_draw_retry
-from spiral.tinker.train_custom import do_spiral_train_step
+from spiral.tinker.train_step import train_step as spiral_train_step
 
 logger = logging.getLogger(__name__)
 
@@ -163,7 +163,7 @@ async def do_sync_training_spiral(
         )
 
         # Train step - use custom SPIRAL training step for RAE
-        train_step_metrics = await do_spiral_train_step(
+        train_step_metrics = await spiral_train_step(
             cfg,
             i_batch,
             training_client,
