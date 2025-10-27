@@ -20,7 +20,7 @@ from tinker_cookbook.completers import TokenCompleter
 from tinker_cookbook.rl.rollouts import do_group_rollout
 from tinker_cookbook.rl.types import TrajectoryGroup
 
-from spiral.tinker_env import SpiralTwoPlayerEnvGroupBuilder
+from spiral.tinker.env import SpiralTwoPlayerEnvGroupBuilder
 
 logger = logging.getLogger(__name__)
 

@@ -24,8 +24,8 @@ from tinker_cookbook.completers import TinkerMessageCompleter
 from tinker_cookbook.rl.types import EnvGroupBuilder, RLDataset, RLDatasetBuilder
 
 from spiral.agents.random import RandomAgent
-from spiral.tinker_env import SpiralTwoPlayerEnvGroupBuilder
-from spiral.tinker_renderer import get_spiral_renderer
+from spiral.tinker.env import SpiralTwoPlayerEnvGroupBuilder
+from spiral.tinker.renderer import get_spiral_renderer
 
 logger = logging.getLogger(__name__)
 

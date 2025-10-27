@@ -36,9 +36,9 @@ from tinker_cookbook.utils import ml_log
 from tinker_cookbook.utils.misc_utils import safezip, timed
 from tinker_cookbook.utils.trace import scope
 
-from spiral.tinker_env import SpiralTwoPlayerEnvGroupBuilder
-from spiral.tinker_rollouts import do_group_rollout_with_draw_retry
-from spiral.tinker_train_custom import do_spiral_train_step
+from spiral.tinker.env import SpiralTwoPlayerEnvGroupBuilder
+from spiral.tinker.rollouts import do_group_rollout_with_draw_retry
+from spiral.tinker.train_custom import do_spiral_train_step
 
 logger = logging.getLogger(__name__)
 

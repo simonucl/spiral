@@ -35,7 +35,7 @@ from tinker_cookbook.rl.types import (
 from spiral.agents.random import RandomAgent
 from spiral.agents.utils import get_valid_action_parser
 from spiral.envs import make_env
-from spiral.tinker_renderer import INVALID_ACTION, SpiralRenderer
+from spiral.tinker.renderer import INVALID_ACTION, SpiralRenderer
 from spiral.utils import EMA
 
 logger = logging.getLogger(__name__)

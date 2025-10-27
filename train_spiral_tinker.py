@@ -20,13 +20,12 @@ import os
 from datetime import datetime
 
 import chz
-import dataclasses
 from tinker_cookbook import cli_utils
 from tinker_cookbook.rl import train
 
 # Import SPIRAL custom train loop with draw retry
-from spiral.tinker_dataset import SpiralRLDatasetBuilder
-from spiral.tinker_train import create_spiral_train_loop
+from spiral.tinker.dataset import SpiralRLDatasetBuilder
+from spiral.tinker.train import create_spiral_train_loop
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
