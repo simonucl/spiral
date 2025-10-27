@@ -99,14 +99,18 @@ async def do_spiral_train_step(
     with timed("prepare_datums", metrics):
         training_datums = []
         for transition in transitions:
-            input_tokens = transition.ob.to_ints() + transition.ac.tokens
-            target_tokens = transition.ac.tokens
+            ob_tokens = transition.ob.to_ints()
+            ac_tokens = transition.ac.tokens
+            ob_len = len(ob_tokens) - 1  # -1 due to shifting
+            tokens = ob_tokens + ac_tokens
+            input_tokens = tokens[:-1]
+            target_tokens = tokens[1:]
 
             # Logprobs: 0 for observation tokens, actual logprobs for action tokens
-            all_logprobs = [0.0] * len(transition.ob.to_ints()) + transition.ac.logprobs
+            all_logprobs = [0.0] * ob_len + transition.ac.logprobs
 
             # Advantages: 0 for observation tokens, advantage value for action tokens
-            all_advantages = [0.0] * len(transition.ob.to_ints()) + [transition.reward] * len(transition.ac.tokens)
+            all_advantages = [0.0] * ob_len + [transition.reward] * len(len(input_tokens) - ob_len)
 
             assert (
                 len(input_tokens)

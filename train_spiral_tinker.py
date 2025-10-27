@@ -16,9 +16,11 @@
 
 import asyncio
 import logging
+import os
 from datetime import datetime
 
 import chz
+import dataclasses
 from tinker_cookbook import cli_utils
 from tinker_cookbook.rl import train
 
@@ -74,7 +76,7 @@ class SpiralConfig(train.Config):
     # Logging
     wandb_project: str | None = "spiral"
     wandb_name: str | None = None
-    log_path: str | None = None
+    log_path: str = ""
 
     # Tinker service
     base_url: str | None = None
@@ -139,7 +141,7 @@ def build_config(cli_config: SpiralConfig) -> train.Config:
     )
 
     # Set log path
-    if cli_config.log_path is not None:
+    if cli_config.log_path:
         log_path = cli_config.log_path
     else:
         log_path = f"/tmp/spiral-tinker/{run_name}"
@@ -183,9 +185,13 @@ def build_config(cli_config: SpiralConfig) -> train.Config:
             f"Enabled streaming minibatch with {cli_config.num_minibatches} minibatches"
         )
 
-    cli_config.dataset_builder = dataset_builder
-    cli_config.stream_minibatch_config = stream_minibatch_config
-    return cli_config
+    config = chz.replace(cli_config, 
+        dataset_builder=dataset_builder, 
+        stream_minibatch_config=stream_minibatch_config, 
+        wandb_name=wandb_name, 
+        log_path=log_path,
+    )
+    return config
 
 
 def main():

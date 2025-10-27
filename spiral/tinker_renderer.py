@@ -15,6 +15,7 @@
 """Renderer for SPIRAL that adapts template system to Tinker's interface."""
 
 import logging
+import re
 from typing import Callable, Optional
 
 import tinker
@@ -143,10 +144,27 @@ class SpiralRenderer(Renderer):
             logger.debug(f"No \\boxed{{}} found in response: {response_text[-100:]}")
             action_text = INVALID_ACTION
         else:
-            # Return extracted action without validation
-            # The Environment will validate it against the game state
-            action_text = extracted_action
+            # 1. Convert \boxed{} format to [content] format if found in the action
+            formatted_action = re.sub(
+                r"\\boxed\{([^}]*)\}",  # Match \boxed{...} capturing everything up to the matching }
+                r"[\1]",  # Replace with brackets around the captured content
+                extracted_action,
+            )
 
+            # 2. If there are no brackets but we should have them, add them
+            if "[" not in formatted_action and "]" not in formatted_action:
+                # Check if this is a short action that likely needs brackets
+                words = formatted_action.split()
+                if (
+                    len(words) <= 5
+                ):  # Heuristic for a short action that might need brackets
+                    formatted_action = f"[{formatted_action}]"
+
+            # 3. Additional cleaning to ensure valid formatting
+            # Remove any extra newlines, tabs, or multiple spaces
+            formatted_action = re.sub(r"\s+", " ", formatted_action).strip()
+
+            action_text = formatted_action
         # Create message
         message: Message = {"role": "assistant", "content": action_text}
 

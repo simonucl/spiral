@@ -433,10 +433,11 @@ class SpiralTwoPlayerEnvGroupBuilder(EnvGroupBuilder):
                     "raw_reward": raw_reward,
                     "baseline": baseline,
                     "adjusted_reward": adjusted_reward,
+                    "trajectory_length": len(traj.transitions),
                 }
             else:
                 adjusted_reward = raw_reward
-                metrics = {"role": player_id, "raw_reward": raw_reward}
+                metrics = {"role": player_id, "raw_reward": raw_reward, "trajectory_length": len(traj.transitions)}
 
             results.append((adjusted_reward, metrics))
 
