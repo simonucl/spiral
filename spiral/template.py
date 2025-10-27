@@ -35,7 +35,9 @@ def apply_qwen3_general_template(
     )
 
 
-def apply_octothinker_template(observation: str, system_prompt: Optional[str] = None) -> str:
+def apply_octothinker_template(
+    observation: str, system_prompt: Optional[str] = None
+) -> str:
     """OctoThinker template for game-based tasks."""
     del system_prompt
     return (
@@ -48,7 +50,9 @@ def apply_octothinker_template(observation: str, system_prompt: Optional[str] = 
     )
 
 
-def apply_octothinker_general_template(observation: str, system_prompt: Optional[str] = None) -> str:
+def apply_octothinker_general_template(
+    observation: str, system_prompt: Optional[str] = None
+) -> str:
     """OctoThinker template for general reasoning tasks."""
     del system_prompt
     return (
@@ -61,7 +65,9 @@ def apply_octothinker_general_template(observation: str, system_prompt: Optional
     )
 
 
-def apply_octothinker_enforce_thinking_template(observation: str, system_prompt: Optional[str] = None) -> str:
+def apply_octothinker_enforce_thinking_template(
+    observation: str, system_prompt: Optional[str] = None
+) -> str:
     """OctoThinker template for games with enforced <think> tags."""
     del system_prompt
     return (
@@ -75,7 +81,9 @@ def apply_octothinker_enforce_thinking_template(observation: str, system_prompt:
     )
 
 
-def apply_octothinker_enforce_thinking_general_template(observation: str, system_prompt: Optional[str] = None) -> str:
+def apply_octothinker_enforce_thinking_general_template(
+    observation: str, system_prompt: Optional[str] = None
+) -> str:
     """OctoThinker template for general reasoning with enforced <think> tags."""
     del system_prompt
     return (
@@ -88,14 +96,20 @@ def apply_octothinker_enforce_thinking_general_template(observation: str, system
         f"Assistant: <think>"
     )
 
-def apply_llama_instruct_template(observation: str, system_prompt: Optional[str] = None) -> str:
+
+def apply_llama_instruct_template(
+    observation: str, system_prompt: Optional[str] = None
+) -> str:
     system_message = "<|begin_of_text|><|start_header_id|>system<|end_header_id|>\n\nYou are playing a two-player zero-sum game. Make valid actions to win.<|eot_id|>"
     user_message = f"<|start_header_id|>user<|end_header_id|>\n\nCurrent Observation: {observation}\nPlease reason step by step, and put your final answer within \\boxed{{}}.<|eot_id|>\n"
     assistant_start = "<|start_header_id|>assistant<|end_header_id|>"
 
     return system_message + user_message + assistant_start
 
-def apply_llama_instruct_general_template(observation: str, system_prompt: Optional[str] = None) -> str:
+
+def apply_llama_instruct_general_template(
+    observation: str, system_prompt: Optional[str] = None
+) -> str:
     system_message = "<|begin_of_text|><|start_header_id|>system<|end_header_id|>\n\nYou are a helpful assistant.<|eot_id|>"
     user_message = f"<|start_header_id|>user<|end_header_id|>\n\nQuestion: {observation}\nPlease reason step by step, and put your final answer within \\boxed{{}}.<|eot_id|>\n"
     assistant_start = "<|start_header_id|>assistant<|end_header_id|>"

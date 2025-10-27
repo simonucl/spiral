@@ -86,6 +86,7 @@ register(
     entry_point="spiral.envs.SimpleBlindAuction.env:SimpleBlindAuctionEnv",
 )
 
+
 def make_env(env_id: str, use_llm_obs_wrapper: bool):
     env = ta.make(env_id)
     if use_llm_obs_wrapper:

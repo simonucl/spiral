@@ -1,4 +1,5 @@
-import re, random
+import random
+import re
 from typing import Any, Dict, Optional, Tuple
 
 import textarena as ta
@@ -12,7 +13,13 @@ class SimpleNegotiationFiveResourceEnv(ta.Env):
         self.max_turns = max_turns
         # Simplified to 2 resources
         self.resource_names = ["Wheat", "Wood", "Sheep", "Brick", "Gold"]
-        self.base_values = {"Wheat": 5, "Wood": 10, "Sheep": 15, "Brick": 25, "Gold": 40}
+        self.base_values = {
+            "Wheat": 5,
+            "Wood": 10,
+            "Sheep": 15,
+            "Brick": 25,
+            "Gold": 40,
+        }
 
         self.accept_pattern = re.compile(r"\[Accept\]", re.IGNORECASE)
         self.deny_pattern = re.compile(r"\[Deny\]", re.IGNORECASE)
@@ -70,8 +77,12 @@ class SimpleNegotiationFiveResourceEnv(ta.Env):
         game_state = {
             "current_offer": None,
             "player_resources": {
-                0: {resource: random.randint(5, 25) for resource in self.resource_names},
-                1: {resource: random.randint(5, 25) for resource in self.resource_names},
+                0: {
+                    resource: random.randint(5, 25) for resource in self.resource_names
+                },
+                1: {
+                    resource: random.randint(5, 25) for resource in self.resource_names
+                },
             },
             "player_values": {},
             "trade_history": [],
@@ -120,10 +131,12 @@ class SimpleNegotiationFiveResourceEnv(ta.Env):
             offer_match = self.offer_pattern.search(action_str)
         except Exception as e:
             accept_match = deny_match = offer_match = None
-        
+
         if not (accept_match or deny_match or offer_match):
             reason = f"Action must be [Accept], [Deny], or [Offer: Offered Resources -> Requested Resources]."
-            self.state.set_invalid_move(player_id=self.state.current_player_id, reason=reason)
+            self.state.set_invalid_move(
+                player_id=self.state.current_player_id, reason=reason
+            )
         else:
             # Check if the player is responding to an existing offer
             self._check_and_execute_existing_offer(
@@ -131,7 +144,9 @@ class SimpleNegotiationFiveResourceEnv(ta.Env):
             )
 
             # Check if the player's action contains a new trade offer
-            self._check_for_new_offer(player_id=self.state.current_player_id, action=action)
+            self._check_for_new_offer(
+                player_id=self.state.current_player_id, action=action
+            )
 
         # Since turn starts at 0, we check if next turn would exceed limit
         if (
@@ -156,10 +171,14 @@ class SimpleNegotiationFiveResourceEnv(ta.Env):
 
         if not current_offer:
             if self.accept_pattern.search(action):
-                reason = f"Player {player_id} tried to accept an offer that does not exist."
+                reason = (
+                    f"Player {player_id} tried to accept an offer that does not exist."
+                )
                 self.state.set_invalid_move(player_id=player_id, reason=reason)
             elif self.deny_pattern.search(action):
-                reason = f"Player {player_id} tried to deny an offer that does not exist."
+                reason = (
+                    f"Player {player_id} tried to deny an offer that does not exist."
+                )
                 self.state.set_invalid_move(player_id=player_id, reason=reason)
             return
 
@@ -363,26 +382,28 @@ class SimpleNegotiationFiveResourceEnv(ta.Env):
             original_str = offer_str
             offer_str = " ".join(offer_str.split())
             offer_str = re.sub(r"[.,!?]+$", "", offer_str)
-            
+
             # Check for malformed brackets - if starts with [ but doesn't end with ]
-            if original_str.strip().startswith('[') and not original_str.strip().endswith(']'):
+            if original_str.strip().startswith(
+                "["
+            ) and not original_str.strip().endswith("]"):
                 return None
-            
+
             # Remove [Offer: prefix and ] suffix
             offer_str = re.sub(r"^\[Offer:\s*", "", offer_str, flags=re.IGNORECASE)
             offer_str = re.sub(r"\]$", "", offer_str)
-            
+
             # Remove other common prefixes (keeping for backward compatibility)
             offer_str = re.sub(
                 r"^(I\s+(?:give|offer)\s+)", "", offer_str, flags=re.IGNORECASE
             )
-            
+
             # Handle LaTeX arrow commands
             offer_str = re.sub(r"\\to\b", "->", offer_str)
             offer_str = re.sub(r"\\rightarrow\b", "->", offer_str)
             offer_str = re.sub(r"\\Rightarrow\b", "->", offer_str)
             offer_str = re.sub(r"\\longrightarrow\b", "->", offer_str)
-            
+
             offer_parts = re.split(r"\s*->\s*", offer_str)
             if len(offer_parts) != 2:
                 return None  # Erroneous offer
@@ -415,23 +436,29 @@ class SimpleNegotiationFiveResourceEnv(ta.Env):
             Optional[Dict[str, int]]: Parsed resources or None if parsing fails.
         """
         # First try traditional separators (comma, "and", "+")
-        if ',' in resource_str or ' and ' in resource_str.lower() or '+' in resource_str:
-            resource_list = re.split(r",\s*|\s+and\s+|\s*\+\s*", resource_str, flags=re.IGNORECASE)
+        if (
+            "," in resource_str
+            or " and " in resource_str.lower()
+            or "+" in resource_str
+        ):
+            resource_list = re.split(
+                r",\s*|\s+and\s+|\s*\+\s*", resource_str, flags=re.IGNORECASE
+            )
         else:
             # Handle space-separated format: "1 Wood 2 Brick"
             # Find all number-resource pairs
             matches = re.findall(r"(\d+)\s+([A-Za-z]+)", resource_str)
             if not matches:
                 return None
-            
+
             # Validate that we consumed the entire string (no leftover parts)
             reconstructed = " ".join([f"{qty} {name}" for qty, name in matches])
             # Remove extra spaces and compare
             if " ".join(resource_str.split()) != " ".join(reconstructed.split()):
                 return None
-                
+
             resource_list = [f"{qty} {name}" for qty, name in matches]
-        
+
         resources = {}
         for item in resource_list:
             item = item.strip()
@@ -443,18 +470,18 @@ class SimpleNegotiationFiveResourceEnv(ta.Env):
                     return None
                 qty_str, resource_name = match.groups()
                 qty = int(qty_str)
-                
+
                 # Check for negative quantities
                 if qty <= 0:
                     return None
-                    
+
                 resource_name = (
                     resource_name.strip().title()
                 )  # Ensure consistent casing
                 # Handle resource aliases if any
                 resource_aliases = {
                     "Woods": "Wood",
-                    "Sheeps": "Sheep", 
+                    "Sheeps": "Sheep",
                     "Bricks": "Brick",
                     "Golds": "Gold",
                     "Wheats": "Wheat",
