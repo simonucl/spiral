@@ -110,7 +110,7 @@ async def do_spiral_train_step(
             all_logprobs = [0.0] * ob_len + transition.ac.logprobs
 
             # Advantages: 0 for observation tokens, advantage value for action tokens
-            all_advantages = [0.0] * ob_len + [transition.reward] * len(len(input_tokens) - ob_len)
+            all_advantages = [0.0] * ob_len + [transition.reward] * (len(input_tokens) - ob_len)
 
             assert (
                 len(input_tokens)
