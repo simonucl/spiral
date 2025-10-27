@@ -52,6 +52,7 @@ class TwoPlayerCoordinator:
         self.shared_env = shared_env  # Should already be reset
         self.condition = asyncio.Condition()
         self.illegal_player_id: int | None = None
+        self.rewards: dict[int, float] = {}
 
     @property
     def state(self) -> ta.State:
@@ -66,11 +67,6 @@ class TwoPlayerCoordinator:
     def game_done(self) -> bool:
         """Check if the game is done. Either the game state is done, or some player made an illegal move"""
         return self.state.done or self.illegal_player_id is not None
-
-    @property
-    def rewards(self) -> dict | None:
-        """Get rewards from the environment state."""
-        return self.state.rewards
 
     async def wait_across_env(self, player_id: int) -> None:
         """Wait until the opponent has finished their turn"""
@@ -93,7 +89,7 @@ class TwoPlayerCoordinator:
             done, _ = self.shared_env.step(move)
 
             if done:
-                self.shared_env.close()
+                self.rewards = self.shared_env.close()
             else:
                 # we will know that the move is illegal if the next player's id has not changed after the move
                 if self.current_player_id == before_player_id:

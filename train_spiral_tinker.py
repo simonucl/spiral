@@ -30,8 +30,8 @@ logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
 
 @chz.chz
-class CLIConfig:
-    """Command-line configuration for SPIRAL training."""
+class SpiralConfig(train.Config):
+    """Configuration for SPIRAL training."""
 
     # Model settings
     model_name: str = "Qwen/Qwen3-8B-Base"
@@ -118,16 +118,8 @@ def parse_opponent_names(opponent_str: str) -> list[str]:
     return [name.strip() for name in opponent_str.split(",")]
 
 
-def build_config(cli_config: CLIConfig) -> train.Config:
-    """
-    Build Tinker training config from CLI config.
+def build_config(cli_config: SpiralConfig) -> train.Config:
 
-    Args:
-        cli_config: CLI configuration
-
-    Returns:
-        Tinker train.Config
-    """
     # Parse template overrides
     template_overrides = parse_template_overrides(cli_config.template_overrides)
 
@@ -191,34 +183,15 @@ def build_config(cli_config: CLIConfig) -> train.Config:
             f"Enabled streaming minibatch with {cli_config.num_minibatches} minibatches"
         )
 
-    # Create training config
-    config = train.Config(
-        model_name=cli_config.model_name,
-        log_path=log_path,
-        dataset_builder=dataset_builder,
-        learning_rate=cli_config.learning_rate,
-        max_tokens=cli_config.max_tokens,
-        lora_rank=cli_config.lora_rank,
-        loss_fn=cli_config.loss_fn,  # type: ignore
-        num_substeps=cli_config.num_substeps,
-        compute_post_kl=cli_config.compute_post_kl,
-        eval_every=cli_config.eval_every,
-        save_every=cli_config.save_every,
-        wandb_project=cli_config.wandb_project,
-        wandb_name=wandb_name,
-        base_url=cli_config.base_url,
-        stream_minibatch_config=stream_minibatch_config,
-        # TODO: Add custom evaluators
-        # evaluator_builders=[],
-    )
-
-    return config
+    cli_config.dataset_builder = dataset_builder
+    cli_config.stream_minibatch_config = stream_minibatch_config
+    return cli_config
 
 
 def main():
     """Main entry point for SPIRAL training."""
     # Parse CLI config
-    cli_config = chz.entrypoint(CLIConfig)
+    cli_config = chz.entrypoint(SpiralConfig)
 
     # Build training config
     config = build_config(cli_config)
