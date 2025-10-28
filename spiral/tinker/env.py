@@ -436,11 +436,8 @@ class SpiralTwoPlayerEnvGroupBuilder(EnvGroupBuilder):
 
             # Apply role baseline if enabled
             if self.use_role_baseline:
-                # Get baseline before updating (to be unbiased)
+                # Get baseline (do NOT update here - will update in batch later)
                 baseline = self._role_baseline_emas[self.env_id][player_id].get()
-
-                # Update role baseline EMA with current reward
-                self._role_baseline_emas[self.env_id][player_id].update(raw_reward)
 
                 # Subtract baseline from reward (RAE)
                 adjusted_reward = raw_reward - baseline
@@ -463,6 +460,39 @@ class SpiralTwoPlayerEnvGroupBuilder(EnvGroupBuilder):
             results.append((adjusted_reward, metrics))
 
         return results
+
+    def update_role_baselines(self, trajectory_groups: list) -> dict[int, float]:
+        """
+        Update role baseline EMAs with rewards from a batch of trajectory groups.
+
+        This should be called once per training batch after all trajectories are collected.
+
+        Args:
+            trajectory_groups: List of trajectory groups from the current batch
+
+        Returns:
+            Dictionary mapping player_id to the new baseline value
+        """
+        if not self.use_role_baseline:
+            return {}
+
+        # Collect all raw rewards per role
+        rewards_by_role = {0: [], 1: []}
+        for traj_group in trajectory_groups:
+            for i, traj in enumerate(traj_group):
+                raw_reward = sum(transition.reward for transition in traj.transitions)
+                player_id = i % 2
+                rewards_by_role[player_id].append(raw_reward)
+
+        # Update EMA with mean reward for each role
+        new_baselines = {}
+        for player_id in [0, 1]:
+            if rewards_by_role[player_id]:
+                mean_reward = sum(rewards_by_role[player_id]) / len(rewards_by_role[player_id])
+                self._role_baseline_emas[self.env_id][player_id].update(mean_reward)
+                new_baselines[player_id] = self._role_baseline_emas[self.env_id][player_id].get()
+
+        return new_baselines
 
     def logging_tags(self) -> list[str]:
         """Return tags for logging/metric aggregation."""

@@ -73,6 +73,30 @@ async def train_step(
     metrics = {}
     t_start = time.time()
 
+    # Step 0: Update role baselines once per batch (before computing advantages)
+    # Group trajectory groups by env_id and update baselines per environment per role
+    with timed("update_baselines", metrics):
+        from collections import defaultdict
+        traj_groups_by_env = defaultdict(list)
+        builder_by_env = {}
+
+        for i, traj_group in enumerate(trajectory_groups_P):
+            if i < len(env_group_builders_P):
+                builder = env_group_builders_P[i]
+                env_id = getattr(builder, 'env_id', None)
+                if env_id:
+                    traj_groups_by_env[env_id].append(traj_group)
+                    builder_by_env[env_id] = builder  # Keep reference to any builder for this env
+
+        # Update baselines for each environment
+        for env_id, env_traj_groups in traj_groups_by_env.items():
+            builder = builder_by_env[env_id]
+            new_baselines = builder.update_role_baselines(env_traj_groups)
+            if new_baselines:
+                # Log the updated baselines
+                for player_id, baseline in new_baselines.items():
+                    metrics[f"train/{env_id}/player_{player_id}_baseline_updated"] = baseline
+
     # Step 1: Collect all turns with their advantages
     # Each trajectory group contains 2 trajectories (one per player)
     transitions: List[Transition] = []
