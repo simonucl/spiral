@@ -202,6 +202,7 @@ async def train_step(
         metrics["train/num_trajectory_groups"] = len(trajectory_groups_P)
 
         # Compute average advantage and reward statistics
+        # TODO: Divide by the number of turns in the advantage calculation, instead of subsampling
         advantages = [transition.reward for transition in transitions]
         if len(advantages) > 0:
             metrics["train/mean_advantage"] = np.mean(advantages)
