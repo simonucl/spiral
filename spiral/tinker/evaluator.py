@@ -87,7 +87,7 @@ class GameEvaluator:
                     opponent_name
                 )
 
-    async def evaluate(
+    async def __call__(
         self, sampling_client: tinker.SamplingClient, max_tokens: int = 2048
     ) -> Dict[str, Any]:
         """

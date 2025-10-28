@@ -229,12 +229,13 @@ async def create_spiral_train_loop(cfg: train.Config):
     # Create dataset from thunk
     dataset, maybe_test_dataset = await cfg.dataset_builder()
     evaluators = [evaluator() for evaluator in cfg.evaluator_builders]
-    if maybe_test_dataset is not None:
-        from tinker_cookbook.rl.metric_util import RLTestSetEvaluator
+    # evaluators = []
+    # if maybe_test_dataset is not None:
+    #     from tinker_cookbook.rl.metric_util import RLTestSetEvaluator
 
-        evaluators.append(
-            RLTestSetEvaluator(maybe_test_dataset, max_tokens=cfg.max_tokens)
-        )
+    #     evaluators.append(
+    #         RLTestSetEvaluator(maybe_test_dataset, max_tokens=cfg.max_tokens)
+    #     )
 
     num_batches = len(dataset)
     logger.info(f"Will train on {num_batches} batches")
