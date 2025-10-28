@@ -179,16 +179,16 @@ async def train_step(
 
     # Step 4: Training step (forward-backward + optimizer step)
     with timed("train", metrics):
-        fwd_bwd_future = training_client.forward_backward(
+        fwd_bwd_future = await training_client.forward_backward_async(
             training_datums, loss_fn=cfg.loss_fn
         )
-        optim_step_future = training_client.optim_step(
+        optim_step_future = await training_client.optim_step_async(
             adam_params=AdamParams(
                 learning_rate=cfg.learning_rate, beta1=0.9, beta2=0.95, eps=1e-8
             )
         )
-        fwd_bwd_result = fwd_bwd_future.result()
-        _ = optim_step_future.result()
+        fwd_bwd_result = await fwd_bwd_future.result_async()
+        _ = await optim_step_future.result_async()
 
     # Step 5: Compute metrics
     with timed("compute_metrics", metrics):
