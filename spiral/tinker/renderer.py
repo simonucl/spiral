@@ -18,6 +18,7 @@ import logging
 import re
 from typing import Callable, Optional
 
+import weave
 import tinker
 from tinker_cookbook.renderers import Message, Renderer, Role
 from tinker_cookbook.tokenizer_utils import Tokenizer
@@ -118,8 +119,9 @@ class SpiralRenderer(Renderer):
         Returns:
             List of stop sequences (as strings)
         """
-        return ["]\n"]
+        return []
 
+    @weave.op()
     def parse_response(self, response: list[int]) -> tuple[Message, bool]:
         """
         Parse a response from the model into a Message and done flag.

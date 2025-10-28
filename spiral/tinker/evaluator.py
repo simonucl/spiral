@@ -225,7 +225,7 @@ class GameEvaluator:
     @weave.op()
     async def _model_act(
         self, policy: TinkerMessageCompleter, observation: str, env_id: str
-    ) -> tuple[str, int]:
+    ) -> tuple[str, int, str]:
         """
         Get model action for a given observation.
 
@@ -259,10 +259,7 @@ class GameEvaluator:
 
         # Parse the response
         parsed_message, _success = policy.renderer.parse_response(response.sequences[0].tokens)
-        response_text = parsed_message["content"]
-
-        # Extract and validate action
-        extracted_action = extract_boxed_answer(response_text)
+        extracted_action = parsed_message["content"]
 
         if extracted_action is None:
             return INVALID_ACTION, gen_length
