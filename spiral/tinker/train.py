@@ -138,7 +138,7 @@ async def do_sync_training_spiral(
         if cfg.eval_every > 0 and i_batch % cfg.eval_every == 0:
             with timed("run_evals", metrics):
                 for evaluator in evaluators:
-                    eval_metrics = await evaluator.evaluate(
+                    eval_metrics = await evaluator(
                         sampling_client, max_tokens=cfg.max_tokens
                     )
                     metrics.update(eval_metrics)

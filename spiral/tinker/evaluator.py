@@ -23,12 +23,13 @@ from typing import Any, Dict, List
 import textarena as ta
 import tinker
 from tinker_cookbook.completers import TinkerMessageCompleter
+from tqdm.asyncio import tqdm
 
 from spiral.agents.random import RandomAgent
 from spiral.agents.utils import get_valid_action_parser
 from spiral.envs import make_env
 from spiral.template import TEMPLATE_FACTORY
-from spiral.tinker.renderer import INVALID_ACTION
+from spiral.tinker.renderer import INVALID_ACTION, get_spiral_renderer
 from spiral.utils import extract_boxed_answer
 
 logger = logging.getLogger(__name__)
@@ -45,6 +46,7 @@ class GameEvaluator:
         self,
         eval_env_ids: List[str],
         eval_opponent_names: List[str],
+        model_name: str,
         eval_use_llm_obs_wrappers: List[bool] | None = None,
         eval_games_per_matchup: int = 16,
         prompt_template: str = "qwen3",
@@ -56,6 +58,7 @@ class GameEvaluator:
         Args:
             eval_env_ids: List of environment IDs to evaluate on
             eval_opponent_names: List of opponent types ("random" or LLM model names)
+            model_name: Model name for creating the renderer
             eval_use_llm_obs_wrappers: Per-env observation wrapper config
             eval_games_per_matchup: Number of games per (env, opponent) matchup
             prompt_template: Template name for formatting observations
@@ -63,6 +66,7 @@ class GameEvaluator:
         """
         self.eval_env_ids = eval_env_ids
         self.eval_opponent_names = eval_opponent_names
+        self.model_name = model_name
         self.eval_use_llm_obs_wrappers = eval_use_llm_obs_wrappers or [
             True
         ] * len(eval_env_ids)
@@ -99,8 +103,13 @@ class GameEvaluator:
         logger.info("Starting game evaluation...")
         t_start = time.time()
 
-        # Create policy from sampling client
-        policy = TinkerMessageCompleter(sampling_client, max_tokens=max_tokens)
+        # Create renderer and policy from sampling client
+        renderer = get_spiral_renderer(self.model_name, self.prompt_template)
+        policy = TinkerMessageCompleter(
+            sampling_client=sampling_client,
+            renderer=renderer,
+            max_tokens=max_tokens,
+        )
 
         # Generate all eval runs
         eval_runs = []
@@ -119,13 +128,13 @@ class GameEvaluator:
                 for game_idx in range(self.eval_games_per_matchup):
                     eval_runs.append((env_id, opponent_name, game_idx))
 
-        # Run all evaluation games
-        results = []
-        for env_id, opponent_name, game_idx in eval_runs:
-            result = await self._run_single_game(
-                policy, env_id, opponent_name, game_idx
-            )
-            results.append(result)
+        # Run all evaluation games in parallel
+        results = await tqdm.gather(
+            *[
+                self._run_single_game(policy, env_id, opponent_name, game_idx)
+                for env_id, opponent_name, game_idx in eval_runs
+            ]
+        )
 
         # Aggregate metrics
         metrics = self._aggregate_metrics(results)

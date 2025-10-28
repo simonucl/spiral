@@ -201,6 +201,7 @@ class SpiralRLDatasetBuilder(RLDatasetBuilder):
             gamma=self.gamma,
             use_llm_obs_wrapper=use_llm_obs_wrapper,
         )
+        return builder
 
     def create_evaluator(self):
         """Create a GameEvaluator for online evaluation."""
@@ -209,6 +210,7 @@ class SpiralRLDatasetBuilder(RLDatasetBuilder):
         return GameEvaluator(
             eval_env_ids=self.eval_env_ids,
             eval_opponent_names=self.eval_opponent_names,
+            model_name=self.model_name,
             eval_use_llm_obs_wrappers=self.eval_use_llm_obs_wrappers,
             eval_games_per_matchup=self.eval_games_per_matchup,
             prompt_template=self.eval_prompt_template,
@@ -232,7 +234,7 @@ class SpiralRLDatasetBuilder(RLDatasetBuilder):
             # LLM opponent via TinkerMessageCompleter
             # Get template and renderer
             template_name = self.template_overrides.get(env_id, self.renderer_name)
-            renderer = get_spiral_renderer(self.model_name, template_name, env_id)
+            renderer = get_spiral_renderer(self.model_name, template_name)
 
             # Create sampling client
             service_client = tinker.ServiceClient(base_url=self.base_url)
