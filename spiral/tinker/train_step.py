@@ -126,10 +126,12 @@ async def train_step(
 
     logger.info(f"Total transitions: {len(transitions)}")
 
-    # Step 2: Subsample to make a constant batch size
-    if len(transitions) > cfg.batch_size:
-        transitions = list(np.random.choice(transitions, cfg.batch_size, replace=False))
-        logger.info(f"Subsampled to {cfg.batch_size} turns")
+    # Step 2: Normalize advantages by total number of transitions
+    # Instead of subsampling, we use all transitions but normalize advantages
+    # to keep the effective batch size consistent
+    total_transitions = len(transitions)
+    advantage_scale = cfg.batch_size / total_transitions if total_transitions > 0 else 1.0
+    logger.info(f"Advantage scale factor: {advantage_scale:.4f} (batch_size={cfg.batch_size}, total_transitions={total_transitions})")
 
     # Step 3: Prepare training datums from transitions
     with timed("prepare_datums", metrics):
@@ -145,8 +147,10 @@ async def train_step(
             # Logprobs: 0 for observation tokens, actual logprobs for action tokens
             all_logprobs = [0.0] * ob_len + transition.ac.logprobs
 
-            # Advantages: 0 for observation tokens, advantage value for action tokens
-            all_advantages = [0.0] * ob_len + [transition.reward] * (
+            # Advantages: 0 for observation tokens, scaled advantage value for action tokens
+            # Scale by advantage_scale to normalize for varying total_transitions
+            scaled_advantage = transition.reward * advantage_scale
+            all_advantages = [0.0] * ob_len + [scaled_advantage] * (
                 len(input_tokens) - ob_len
             )
 
@@ -224,15 +228,20 @@ async def train_step(
         # Add basic statistics
         metrics["train/num_turns"] = len(transitions)
         metrics["train/num_trajectory_groups"] = len(trajectory_groups_P)
+        metrics["train/advantage_scale"] = advantage_scale
 
-        # Compute average advantage and reward statistics
-        # TODO: Divide by the number of turns in the advantage calculation, instead of subsampling
+        # Compute average advantage and reward statistics (before scaling)
         advantages = [transition.reward for transition in transitions]
         if len(advantages) > 0:
             metrics["train/mean_advantage"] = np.mean(advantages)
             metrics["train/std_advantage"] = np.std(advantages)
             metrics["train/max_advantage"] = np.max(advantages)
             metrics["train/min_advantage"] = np.min(advantages)
+
+            # Also track scaled advantages
+            scaled_advantages = [adv * advantage_scale for adv in advantages]
+            metrics["train/mean_scaled_advantage"] = np.mean(scaled_advantages)
+            metrics["train/std_scaled_advantage"] = np.std(scaled_advantages)
 
         # Compute comprehensive trajectory metrics using utility function
         trajectory_metrics = compute_trajectory_metrics(trajectory_groups_P, prefix="train")
