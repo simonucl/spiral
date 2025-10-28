@@ -172,13 +172,15 @@ class GameEvaluator:
         turn_counter = 0
         done = False
         invalid_action_player = None
+        model_gen_lengths = []  # Track generation lengths for model actions
 
         while not done:
             pid, observation = env.get_observation()
 
             # Get action from appropriate agent
             if pid == model_pid:
-                action = await self._model_act(policy, observation, env_id)
+                action, gen_length = await self._model_act(policy, observation, env_id)
+                model_gen_lengths.append(gen_length)
             else:
                 action = opponent(observation)
 
@@ -216,27 +218,52 @@ class GameEvaluator:
             "model_reward": rewards[model_pid],
             "opponent_reward": rewards[opponent_pid],
             "model_pid": model_pid,
+            "model_gen_lengths": model_gen_lengths,  # List of generation lengths
         }
 
     async def _model_act(
         self, policy: TinkerMessageCompleter, observation: str, env_id: str
-    ) -> str:
-        """Get model action for a given observation."""
+    ) -> tuple[str, int]:
+        """
+        Get model action for a given observation.
+
+        Returns:
+            Tuple of (action_string, generation_length)
+        """
         # Format observation with template
         formatted_observation = TEMPLATE_FACTORY[self.prompt_template](
             observation, system_prompt=None
         )
 
-        # Get model response
+        # Get model response - need to access the sampling client directly to get token count
         messages = [{"role": "user", "content": formatted_observation}]
-        response = await policy(messages)
-        response_text = response["content"]
+
+        # Build the generation prompt
+        model_input = policy.renderer.build_generation_prompt(messages)
+
+        # Sample directly to get token information
+        response = await policy.sampling_client.sample_async(
+            model_input,
+            num_samples=1,
+            sampling_params=tinker.SamplingParams(
+                temperature=1.0,
+                max_tokens=policy.max_tokens,
+                stop=policy.stop_condition,
+            ),
+        )
+
+        # Get token count
+        gen_length = len(response.sequences[0].tokens)
+
+        # Parse the response
+        parsed_message, _success = policy.renderer.parse_response(response.sequences[0].tokens)
+        response_text = parsed_message["content"]
 
         # Extract and validate action
         extracted_action = extract_boxed_answer(response_text)
 
         if extracted_action is None:
-            return INVALID_ACTION
+            return INVALID_ACTION, gen_length
 
         # Validate action against action space
         try:
@@ -244,26 +271,26 @@ class GameEvaluator:
 
             if env_id in ["DontSayIt-v0", "SimpleNegotiation-v1"]:
                 # Free-form chat, no validation
-                return extracted_action
+                return extracted_action, gen_length
             elif env_id == "SimpleNegotiation-v2":
                 # Regex patterns
                 patterns = action_parser(observation)
                 for pattern in patterns:
                     if pattern.match(extracted_action):
-                        return extracted_action
-                return INVALID_ACTION
+                        return extracted_action, gen_length
+                return INVALID_ACTION, gen_length
             else:
                 # Standard validation
                 valid_actions = action_parser(observation)
                 if extracted_action in valid_actions:
-                    return extracted_action
-                return INVALID_ACTION
+                    return extracted_action, gen_length
+                return INVALID_ACTION, gen_length
         except NotImplementedError:
             # No action parser for this env, accept as-is
-            return extracted_action
+            return extracted_action, gen_length
         except Exception as e:
             logger.warning(f"Error validating action: {e}")
-            return extracted_action
+            return extracted_action, gen_length
 
     def _aggregate_metrics(self, results: List[Dict[str, Any]]) -> Dict[str, Any]:
         """Aggregate results into metrics."""
@@ -314,6 +341,15 @@ class GameEvaluator:
             metrics[f"{prefix}/avg_turns"] = avg_turns
             metrics[f"{prefix}/avg_reward"] = avg_reward
 
+            # Generation length metrics
+            all_gen_lengths = [
+                length
+                for r in env_results
+                for length in r["model_gen_lengths"]
+            ]
+            if len(all_gen_lengths) > 0:
+                metrics[f"{prefix}/mean_gen_length"] = sum(all_gen_lengths) / len(all_gen_lengths)
+
         # Compute metrics per matchup (env + opponent)
         for (env_id, opponent_name), matchup_results in grouped_by_matchup.items():
             prefix = f"eval/{env_id}/{opponent_name}"
@@ -348,6 +384,15 @@ class GameEvaluator:
             metrics[f"{prefix}/avg_turns"] = avg_turns
             metrics[f"{prefix}/avg_reward"] = avg_reward
 
+            # Generation length metrics
+            all_gen_lengths = [
+                length
+                for r in matchup_results
+                for length in r["model_gen_lengths"]
+            ]
+            if len(all_gen_lengths) > 0:
+                metrics[f"{prefix}/mean_gen_length"] = sum(all_gen_lengths) / len(all_gen_lengths)
+
         # Compute overall metrics (averaged across all games and opponents)
         if results:
             total_games = len(results)
@@ -366,5 +411,16 @@ class GameEvaluator:
             metrics["eval/overall/avg_turns"] = (
                 sum(r["num_turns"] for r in results) / total_games
             )
+
+            # Overall generation length metrics
+            all_gen_lengths = [
+                length
+                for r in results
+                for length in r["model_gen_lengths"]
+            ]
+            if len(all_gen_lengths) > 0:
+                metrics["eval/overall/mean_gen_length"] = (
+                    sum(all_gen_lengths) / len(all_gen_lengths)
+                )
 
         return metrics

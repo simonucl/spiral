@@ -68,6 +68,7 @@ def compute_trajectory_metrics(trajectory_groups, prefix: str = "train") -> Dict
     player_invalid_count = defaultdict(int)
     player_turn_count = defaultdict(int)
     player_baselines = defaultdict(list)
+    player_gen_lengths = defaultdict(list)  # Track generation lengths per player
     draw_count = 0
     decisive_count = 0
 
@@ -92,10 +93,13 @@ def compute_trajectory_metrics(trajectory_groups, prefix: str = "train") -> Dict
                 player_rewards[player_id].append(reward)
                 player_turn_count[player_id] += len(trajectory.transitions)
 
-                # Count invalid actions
+                # Count invalid actions and track generation lengths
                 for transition in trajectory.transitions:
                     if transition.metrics.get("invalid_action", 0) == 1:
                         player_invalid_count[player_id] += 1
+                    # Track generation length (number of tokens generated)
+                    gen_length = len(transition.ac.tokens)
+                    player_gen_lengths[player_id].append(gen_length)
 
         # Collect baseline metrics
         for traj_metrics in traj_group.metrics_G:
@@ -121,6 +125,12 @@ def compute_trajectory_metrics(trajectory_groups, prefix: str = "train") -> Dict
                     player_invalid_count[player_id] / player_turn_count[player_id]
                 )
 
+            # Add generation length metrics
+            if len(player_gen_lengths[player_id]) > 0:
+                metrics[f"{prefix}/player_{player_id}/mean_gen_length"] = np.mean(
+                    player_gen_lengths[player_id]
+                )
+
         # Add baseline metrics if available
         if len(player_baselines[player_id]) > 0:
             metrics[f"{prefix}/player_{player_id}_baseline"] = np.mean(
@@ -133,6 +143,11 @@ def compute_trajectory_metrics(trajectory_groups, prefix: str = "train") -> Dict
     metrics[f"{prefix}/total_invalid_count"] = total_invalid_count
     if total_turn_count > 0:
         metrics[f"{prefix}/total_invalid_rate"] = total_invalid_count / total_turn_count
+
+    # Overall generation length metrics
+    all_gen_lengths = [length for lengths in player_gen_lengths.values() for length in lengths]
+    if len(all_gen_lengths) > 0:
+        metrics[f"{prefix}/mean_gen_length"] = np.mean(all_gen_lengths)
 
     # Game outcome metrics
     total_games = draw_count + decisive_count
