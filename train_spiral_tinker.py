@@ -184,10 +184,17 @@ def build_config(cli_config: SpiralConfig) -> train.Config:
             f"Enabled streaming minibatch with {cli_config.num_minibatches} minibatches"
         )
 
-    config = chz.replace(cli_config, 
-        dataset_builder=dataset_builder, 
-        stream_minibatch_config=stream_minibatch_config, 
-        wandb_name=wandb_name, 
+    # Create evaluator builders
+    evaluator_builders = []
+    if cli_config.eval_every > 0:
+        # Add game evaluator
+        evaluator_builders.append(lambda: dataset_builder.create_evaluator())
+
+    config = chz.replace(cli_config,
+        dataset_builder=dataset_builder,
+        evaluator_builders=evaluator_builders,
+        stream_minibatch_config=stream_minibatch_config,
+        wandb_name=wandb_name,
         log_path=log_path,
     )
     return config

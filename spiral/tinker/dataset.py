@@ -142,7 +142,11 @@ class SpiralRLDatasetBuilder(RLDatasetBuilder):
         default=None,
         munger=lambda self, val: val if val is not None else self.use_llm_obs_wrappers,
     )
-    eval_opponent_names: list[str] = chz.field(default_factory=lambda: ["random"])
+    eval_opponent_names: list[str] = chz.field(
+        default_factory=lambda: ["random", "google/gemini-2.0-flash-exp"]
+    )
+    eval_games_per_matchup: int = 16
+    eval_prompt_template: str = "qwen3"
 
     # Tinker settings
     base_url: str | None = None
@@ -198,7 +202,18 @@ class SpiralRLDatasetBuilder(RLDatasetBuilder):
             use_llm_obs_wrapper=use_llm_obs_wrapper,
         )
 
-        return builder
+    def create_evaluator(self):
+        """Create a GameEvaluator for online evaluation."""
+        from spiral.tinker.evaluator import GameEvaluator
+
+        return GameEvaluator(
+            eval_env_ids=self.eval_env_ids,
+            eval_opponent_names=self.eval_opponent_names,
+            eval_use_llm_obs_wrappers=self.eval_use_llm_obs_wrappers,
+            eval_games_per_matchup=self.eval_games_per_matchup,
+            prompt_template=self.eval_prompt_template,
+            model_player_id=0,  # Model always plays as player 0 during eval
+        )
 
     def _create_opponent_policy(self, opponent_name: str, env_id: str):
         """

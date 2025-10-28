@@ -214,6 +214,49 @@ async def train_step(
         trajectory_metrics = compute_trajectory_metrics(trajectory_groups_P, prefix="train")
         metrics.update(trajectory_metrics)
 
+        # Compute win/loss/draw rates per game and overall from training trajectories
+        # Group by env_id
+        from collections import defaultdict
+        env_outcomes = defaultdict(lambda: {"win": 0, "loss": 0, "draw": 0})
+        overall_outcomes = {"win": 0, "loss": 0, "draw": 0}
+
+        for i, traj_group in enumerate(trajectory_groups_P):
+            total_rewards = traj_group.get_total_rewards()
+
+            # Determine outcome (from player 0's perspective)
+            if len(total_rewards) >= 2:
+                if total_rewards[0] > total_rewards[1]:
+                    outcome = "win"
+                elif total_rewards[0] < total_rewards[1]:
+                    outcome = "loss"
+                else:
+                    outcome = "draw"
+
+                # Get env_id from the corresponding builder
+                env_id = None
+                if i < len(env_group_builders_P) and hasattr(env_group_builders_P[i], 'env_id'):
+                    env_id = env_group_builders_P[i].env_id
+
+                # Update counts
+                if env_id:
+                    env_outcomes[env_id][outcome] += 1
+                overall_outcomes[outcome] += 1
+
+        # Compute rates per game
+        for env_id, outcomes in env_outcomes.items():
+            total = sum(outcomes.values())
+            if total > 0:
+                metrics[f"train/{env_id}/win_rate"] = outcomes["win"] / total
+                metrics[f"train/{env_id}/loss_rate"] = outcomes["loss"] / total
+                metrics[f"train/{env_id}/draw_rate"] = outcomes["draw"] / total
+
+        # Compute overall rates
+        total_overall = sum(overall_outcomes.values())
+        if total_overall > 0:
+            metrics["train/overall/win_rate"] = overall_outcomes["win"] / total_overall
+            metrics["train/overall/loss_rate"] = overall_outcomes["loss"] / total_overall
+            metrics["train/overall/draw_rate"] = overall_outcomes["draw"] / total_overall
+
     metrics["time/train_total"] = time.time() - t_start
 
     return metrics

@@ -138,8 +138,10 @@ async def do_sync_training_spiral(
         if cfg.eval_every > 0 and i_batch % cfg.eval_every == 0:
             with timed("run_evals", metrics):
                 for evaluator in evaluators:
-                    eval_metrics = await evaluator(sampling_client)
-                    metrics.update({f"test/{k}": v for k, v in eval_metrics.items()})
+                    eval_metrics = await evaluator.evaluate(
+                        sampling_client, max_tokens=cfg.max_tokens
+                    )
+                    metrics.update(eval_metrics)
 
         # Get batch and sample trajectories
         env_group_builders_P = dataset.get_batch(i_batch)
