@@ -28,6 +28,8 @@ from tinker_cookbook.tokenizer_utils import Tokenizer
 from tinker_cookbook.utils import ml_log
 from tinker_cookbook.utils.misc_utils import timed
 from tinker_cookbook.utils.trace import scope
+
+from spiral.tinker.utils import convert_to_json_serializable
 from tqdm.asyncio import tqdm
 
 from spiral.tinker.env import SpiralTwoPlayerEnvGroupBuilder
@@ -132,12 +134,12 @@ async def do_sync_training_spiral(
         }
         t_start = time.time()
 
-        # # Run evaluations
-        # if cfg.eval_every > 0 and i_batch % cfg.eval_every == 0:
-        #     with timed("run_evals", metrics):
-        #         for evaluator in evaluators:
-        #             eval_metrics = await evaluator(sampling_client)
-        #             metrics.update({f"test/{k}": v for k, v in eval_metrics.items()})
+        # Run evaluations
+        if cfg.eval_every > 0 and i_batch % cfg.eval_every == 0:
+            with timed("run_evals", metrics):
+                for evaluator in evaluators:
+                    eval_metrics = await evaluator(sampling_client)
+                    metrics.update({f"test/{k}": v for k, v in eval_metrics.items()})
 
         # Get batch and sample trajectories
         env_group_builders_P = dataset.get_batch(i_batch)
@@ -175,6 +177,7 @@ async def do_sync_training_spiral(
         # Log metrics
         metrics.update(train_step_metrics)
         metrics["time/total"] = time.time() - t_start
+        metrics = convert_to_json_serializable(metrics)
         ml_logger.log_metrics(metrics, step=i_batch)
 
 

@@ -142,3 +142,19 @@ def compute_trajectory_metrics(trajectory_groups, prefix: str = "train") -> Dict
         metrics[f"{prefix}/decisive_count"] = decisive_count
 
     return metrics
+
+def convert_to_json_serializable(obj: Any) -> Any:
+    """Convert numpy types and other non-serializable types to JSON-serializable types."""
+    import numpy as np
+    
+    if isinstance(obj, (np.integer, np.int64, np.int32, np.int16, np.int8)):
+        return int(obj)
+    elif isinstance(obj, (np.floating, np.float64, np.float32, np.float16)):
+        return float(obj)
+    elif isinstance(obj, np.ndarray):
+        return obj.tolist()
+    elif isinstance(obj, dict):
+        return {k: convert_to_json_serializable(v) for k, v in obj.items()}
+    elif isinstance(obj, (list, tuple)):
+        return [convert_to_json_serializable(item) for item in obj]
+    return obj

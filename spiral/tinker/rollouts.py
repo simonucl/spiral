@@ -28,7 +28,7 @@ from tinker_cookbook.tokenizer_utils import get_tokenizer
 from spiral.tinker.env import SpiralTwoPlayerEnvGroupBuilder
 
 logger = logging.getLogger(__name__)
-
+logger.setLevel(logging.DEBUG)
 
 def check_valid_observation(ob: Observation) -> bool:
     """Check if observation is valid (non-empty ModelInput)."""
