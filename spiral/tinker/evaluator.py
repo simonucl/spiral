@@ -133,7 +133,8 @@ class GameEvaluator:
             *[
                 self._run_single_game(policy, env_id, opponent_name, game_idx)
                 for env_id, opponent_name, game_idx in eval_runs
-            ]
+            ],
+            desc="Evaluating games",
         )
 
         # Aggregate metrics

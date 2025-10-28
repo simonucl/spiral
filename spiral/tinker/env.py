@@ -23,7 +23,7 @@ import textarena as ta
 from tinker import ModelInput, types
 from tinker_cookbook.completers import StopCondition
 from tinker_cookbook.rl.types import (Action, Env, EnvGroupBuilder, Metrics,
-                                      Observation, StepResult, Trajectory)
+                                      Observation, StepResult, Trajectory, TrajectoryGroup)
 
 from spiral.agents.random import RandomAgent
 from spiral.agents.utils import get_valid_action_parser
@@ -461,7 +461,7 @@ class SpiralTwoPlayerEnvGroupBuilder(EnvGroupBuilder):
 
         return results
 
-    def update_role_baselines(self, trajectory_groups: list) -> dict[int, float]:
+    def update_role_baselines(self, trajectory_groups: list[TrajectoryGroup]) -> dict[int, float]:
         """
         Update role baseline EMAs with rewards from a batch of trajectory groups.
 
@@ -479,7 +479,7 @@ class SpiralTwoPlayerEnvGroupBuilder(EnvGroupBuilder):
         # Collect all raw rewards per role
         rewards_by_role = {0: [], 1: []}
         for traj_group in trajectory_groups:
-            for i, traj in enumerate(traj_group):
+            for i, traj in enumerate(traj_group.trajectories_G):
                 raw_reward = sum(transition.reward for transition in traj.transitions)
                 player_id = i % 2
                 rewards_by_role[player_id].append(raw_reward)
