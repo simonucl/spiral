@@ -19,6 +19,7 @@ import random
 import time
 from collections import defaultdict
 from typing import Any, Dict, List
+import weave
 
 import textarena as ta
 import tinker
@@ -221,6 +222,7 @@ class GameEvaluator:
             "model_gen_lengths": model_gen_lengths,  # List of generation lengths
         }
 
+    @weave.op()
     async def _model_act(
         self, policy: TinkerMessageCompleter, observation: str, env_id: str
     ) -> tuple[str, int]:
