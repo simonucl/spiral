@@ -26,6 +26,7 @@ from tinker_cookbook.rl import train
 # Import SPIRAL custom train loop with draw retry
 from spiral.tinker.dataset import SpiralRLDatasetBuilder
 from spiral.tinker.train import create_spiral_train_loop
+from spiral.tinker.math_test import SpiralMathTestDatasetBuilder
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
@@ -68,6 +69,11 @@ class SpiralConfig(train.Config):
     eval_every: int = 16
     save_every: int = 20
     compute_post_kl: bool = False
+
+    # Math test evaluation settings
+    math_test_data_paths: str = ""  # Comma-separated paths (e.g., "data/aime,data/amc")
+    math_test_batch_size: int = 32  # Batch size for math test evaluation
+    enable_math_test_eval: bool = False  # Whether to enable math test evaluation
 
     # Loss function
     loss_fn: str = "importance_sampling"  # or "ppo"
@@ -131,6 +137,13 @@ def build_config(cli_config: SpiralConfig) -> train.Config:
     )
     eval_opponent_names = parse_opponent_names(cli_config.eval_opponent_names)
 
+    # Parse math test data paths
+    math_test_data_paths = []
+    if cli_config.enable_math_test_eval and cli_config.math_test_data_paths:
+        math_test_data_paths = [
+            path.strip() for path in cli_config.math_test_data_paths.split(",")
+        ]
+
     # Create run name
     date_and_time = datetime.now().strftime("%Y-%m-%d-%H-%M")
     env_str = "+".join([env.replace("-v0", "").replace("-v1", "").replace("-v2", "") for env in cli_config.env_ids])
@@ -152,26 +165,69 @@ def build_config(cli_config: SpiralConfig) -> train.Config:
         wandb_name = run_name
 
     # Create dataset builder
-    dataset_builder = SpiralRLDatasetBuilder(
-        batch_size=cli_config.batch_size,
-        num_train_datapoints=cli_config.num_train_datapoints,
-        num_test_datapoints=cli_config.num_test_datapoints,
-        model_name=cli_config.model_name,
-        renderer_name=cli_config.renderer_name,
-        env_ids=cli_config.env_ids,
-        use_llm_obs_wrappers=cli_config.use_llm_obs_wrappers,
-        template_overrides=template_overrides,
-        filter_draw=cli_config.filter_draw,
-        max_draw_retries=cli_config.max_draw_retries,
-        use_role_baseline=cli_config.use_role_baseline,
-        role_baseline_ema_gamma=cli_config.role_baseline_ema_gamma,
-        use_intermediate_rewards=cli_config.use_intermediate_rewards,
-        gamma=cli_config.gamma,
-        eval_env_ids=eval_env_ids,
-        eval_use_llm_obs_wrappers=eval_use_llm_obs_wrappers,
-        eval_opponent_names=eval_opponent_names,
-        base_url=cli_config.base_url,
-    )
+    # If math test eval is enabled, wrap both game and math datasets
+    if cli_config.enable_math_test_eval and math_test_data_paths:
+        # Create game dataset builder
+        game_dataset_builder = SpiralRLDatasetBuilder(
+            batch_size=cli_config.batch_size,
+            num_train_datapoints=cli_config.num_train_datapoints,
+            num_test_datapoints=cli_config.num_test_datapoints,
+            model_name=cli_config.model_name,
+            renderer_name=cli_config.renderer_name,
+            env_ids=cli_config.env_ids,
+            use_llm_obs_wrappers=cli_config.use_llm_obs_wrappers,
+            template_overrides=template_overrides,
+            filter_draw=cli_config.filter_draw,
+            max_draw_retries=cli_config.max_draw_retries,
+            use_role_baseline=cli_config.use_role_baseline,
+            role_baseline_ema_gamma=cli_config.role_baseline_ema_gamma,
+            use_intermediate_rewards=cli_config.use_intermediate_rewards,
+            gamma=cli_config.gamma,
+            eval_env_ids=eval_env_ids,
+            eval_use_llm_obs_wrappers=eval_use_llm_obs_wrappers,
+            eval_opponent_names=eval_opponent_names,
+            base_url=cli_config.base_url,
+        )
+
+        # Create math test dataset builder
+        math_test_builder = SpiralMathTestDatasetBuilder(
+            data_paths=math_test_data_paths,
+            batch_size=cli_config.math_test_batch_size,
+            model_name_for_tokenizer=cli_config.model_name,
+            renderer_name="qwen3_instruct"
+        )
+
+        # Create a wrapper that returns both game training data and math test data
+        async def combined_dataset_builder():
+            game_train, game_test = await game_dataset_builder()
+            _, math_test = await math_test_builder()
+            # Return game training data and math test data
+            return (game_train, math_test)
+
+        dataset_builder = combined_dataset_builder
+        logger.info(f"Math test evaluation enabled with datasets: {math_test_data_paths}")
+    else:
+        # Just use game dataset builder
+        dataset_builder = SpiralRLDatasetBuilder(
+            batch_size=cli_config.batch_size,
+            num_train_datapoints=cli_config.num_train_datapoints,
+            num_test_datapoints=cli_config.num_test_datapoints,
+            model_name=cli_config.model_name,
+            renderer_name=cli_config.renderer_name,
+            env_ids=cli_config.env_ids,
+            use_llm_obs_wrappers=cli_config.use_llm_obs_wrappers,
+            template_overrides=template_overrides,
+            filter_draw=cli_config.filter_draw,
+            max_draw_retries=cli_config.max_draw_retries,
+            use_role_baseline=cli_config.use_role_baseline,
+            role_baseline_ema_gamma=cli_config.role_baseline_ema_gamma,
+            use_intermediate_rewards=cli_config.use_intermediate_rewards,
+            gamma=cli_config.gamma,
+            eval_env_ids=eval_env_ids,
+            eval_use_llm_obs_wrappers=eval_use_llm_obs_wrappers,
+            eval_opponent_names=eval_opponent_names,
+            base_url=cli_config.base_url,
+        )
 
     # Create streaming config if enabled
     stream_minibatch_config = None
@@ -188,7 +244,11 @@ def build_config(cli_config: SpiralConfig) -> train.Config:
     evaluator_builders = []
     if cli_config.eval_every > 0:
         # Add game evaluator
-        evaluator_builders.append(lambda: dataset_builder.create_evaluator())
+        # If using combined dataset builder, need to access the game builder
+        if cli_config.enable_math_test_eval and math_test_data_paths:
+            evaluator_builders.append(lambda: game_dataset_builder.create_evaluator())
+        else:
+            evaluator_builders.append(lambda: dataset_builder.create_evaluator())
 
     config = chz.replace(cli_config,
         dataset_builder=dataset_builder,

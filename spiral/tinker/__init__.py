@@ -20,6 +20,8 @@ from spiral.tinker.env import (ILLEGAL_MOVE_REWARD, INVALID_ACTION,
                                SpiralTwoPlayerEnvGroupBuilder,
                                TwoPlayerCoordinator)
 from spiral.tinker.evaluator import GameEvaluator
+from spiral.tinker.math_test import (SpiralMathTestDataset,
+                                     SpiralMathTestDatasetBuilder)
 from spiral.tinker.renderer import SpiralRenderer, get_spiral_renderer
 from spiral.tinker.rollouts import (do_group_rollout,
                                     do_group_rollout_with_draw_retry,
@@ -32,6 +34,8 @@ from spiral.tinker.utils import compute_trajectory_metrics
 __all__ = [
     # Dataset
     "SpiralRLDatasetBuilder",
+    "SpiralMathTestDataset",
+    "SpiralMathTestDatasetBuilder",
     # Environment
     "TwoPlayerCoordinator",
     "SpiralTwoPlayerEnv",
