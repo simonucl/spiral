@@ -72,7 +72,6 @@ class SpiralConfig(train.Config):
 
     # Math test evaluation settings
     math_test_data_paths: str = ""  # Comma-separated paths (e.g., "data/aime,data/amc")
-    math_test_batch_size: int = 32  # Batch size for math test evaluation
     enable_math_test_eval: bool = False  # Whether to enable math test evaluation
 
     # Loss function
@@ -192,7 +191,6 @@ def build_config(cli_config: SpiralConfig) -> train.Config:
         # Create math test dataset builder
         math_test_builder = SpiralMathTestDatasetBuilder(
             data_paths=math_test_data_paths,
-            batch_size=cli_config.math_test_batch_size,
             model_name_for_tokenizer=cli_config.model_name,
             renderer_name="qwen3_instruct"
         )

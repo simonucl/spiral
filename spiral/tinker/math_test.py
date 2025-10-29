@@ -54,7 +54,6 @@ class SpiralMathTestDataset(RLDataset):
     def __init__(
         self,
         data_path: str,
-        batch_size: int,
         renderer: renderers.Renderer,
     ):
         """
@@ -62,30 +61,26 @@ class SpiralMathTestDataset(RLDataset):
 
         Args:
             data_path: Path to the dataset directory (e.g., "data/aime")
-            batch_size: Number of problems per batch
             renderer: Renderer for formatting prompts
-            convo_prefix: Optional conversation prefix (fewshot examples)
         """
         self.ds = load_from_disk(data_path)
-        self.batch_size = batch_size
         self.renderer = renderer
         # For test datasets, always use group_size=1 (no parallel envs per problem)
         self.group_size = 1
 
     def get_batch(self, index: int) -> Sequence[EnvGroupBuilder]:
-        """Get a batch of environment group builders."""
-        batch_start = index * self.batch_size
-        batch_end = min((index + 1) * self.batch_size, len(self.ds))
-        assert batch_start < batch_end, "Incorrect batch size"
+        """Get all problems as a single batch (parallel evaluation)."""
+        if index > 0:
+            return []
         return [
             builder
-            for row in self.ds.select(range(batch_start, batch_end))
+            for row in self.ds
             if (builder := self._make_env_group_builder(row, self.group_size)) is not None
         ]
 
     def __len__(self) -> int:
         """Number of batches in the dataset."""
-        return math.ceil(len(self.ds) / self.batch_size)
+        return 1  # All problems evaluated in parallel
 
     def _make_env_group_builder(
         self, x: dict[str, str], group_size: int
@@ -117,7 +112,6 @@ class SpiralMathTestDatasetBuilder(RLDatasetBuilder):
     """
 
     data_paths: list[str] | str  # Can be single path or list of paths
-    batch_size: int
     model_name_for_tokenizer: str
     renderer_name: str
 
@@ -140,14 +134,12 @@ class SpiralMathTestDatasetBuilder(RLDatasetBuilder):
             # Single dataset
             test_dataset = SpiralMathTestDataset(
                 data_path=paths[0],
-                batch_size=self.batch_size,
                 renderer=renderer,
             )
         else:
             # Multiple datasets - concatenate them
             test_dataset = ConcatenatedMathTestDataset(
                 data_paths=paths,
-                batch_size=self.batch_size,
                 renderer=renderer,
             )
 
@@ -165,7 +157,6 @@ class ConcatenatedMathTestDataset(RLDataset):
     def __init__(
         self,
         data_paths: list[str],
-        batch_size: int,
         renderer: renderers.Renderer,
     ):
         """
@@ -173,30 +164,25 @@ class ConcatenatedMathTestDataset(RLDataset):
 
         Args:
             data_paths: List of dataset directory paths
-            batch_size: Number of problems per batch
             renderer: Renderer for formatting prompts
         """
         self.datasets = [
             SpiralMathTestDataset(
                 data_path=path,
-                batch_size=batch_size,
                 renderer=renderer,
             )
             for path in data_paths
         ]
-        self.batch_size = batch_size
 
     def get_batch(self, index: int) -> Sequence[EnvGroupBuilder]:
-        """Get a batch by concatenating across datasets."""
+        """Get all problems from all datasets (parallel evaluation)."""
+        if index > 0:
+            return []
         builders = []
         for dataset in self.datasets:
-            # Each dataset contributes proportionally to the batch
-            dataset_batch_size = self.batch_size // len(self.datasets)
-            dataset_index = index % len(dataset)
-            batch = dataset.get_batch(dataset_index)
-            builders.extend(batch[:dataset_batch_size])
+            builders.extend(dataset.get_batch(0))
         return builders
 
     def __len__(self) -> int:
         """Total number of batches across all datasets."""
-        return max(len(ds) for ds in self.datasets)
+        return 1  # All problems evaluated in parallel
