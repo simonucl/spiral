@@ -93,8 +93,10 @@ class SpiralMathTestDataset(RLDataset):
             logger.warning(f"Missing problem or answer: {x}")
             return None
 
-        # For SPIRAL datasets, answers are already in the correct format
-        # No need to extract from boxed solution like in Hendrycks MATH
+        # Convert answer to string if it's a number (float/int)
+        if isinstance(answer, (int, float)):
+            answer = str(answer)
+
         return ProblemGroupBuilder(
             env_thunk=partial(
                 SpiralMathTestEnv, problem, answer, self.renderer, convo_prefix=None
