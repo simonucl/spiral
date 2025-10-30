@@ -139,7 +139,7 @@ async def do_sync_training_spiral(
             with timed("run_evals", metrics):
                 for evaluator in evaluators:
                     eval_metrics = await evaluator(
-                        sampling_client, max_tokens=cfg.max_tokens
+                        sampling_client
                     )
                     metrics.update(eval_metrics)
 
@@ -228,7 +228,8 @@ async def create_spiral_train_loop(cfg: train.Config):
 
     # Create dataset from thunk
     dataset, maybe_test_dataset = await cfg.dataset_builder()
-    evaluators = [evaluator() for evaluator in cfg.evaluator_builders]
+    # evaluators = [evaluator() for evaluator in cfg.evaluator_builders]
+    evaluators = []
     if maybe_test_dataset is not None:
         from tinker_cookbook.rl.metric_util import RLTestSetEvaluator
 
