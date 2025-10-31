@@ -12,31 +12,63 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Renderer for SPIRAL that adapts template system to Tinker's interface."""
+"""Renderer for SPIRAL that uses tinker-cookbook renderers with game-specific adaptations."""
 
 import logging
 import re
-from typing import Callable, Optional
 
 import weave
 import tinker
-from tinker_cookbook.renderers import Message, Renderer, Role
+from tinker_cookbook.renderers import Message, Renderer, Role, get_renderer
 from tinker_cookbook.tokenizer_utils import Tokenizer
 
-from spiral.template import TEMPLATE_FACTORY
 from spiral.utils import extract_boxed_answer
 
 logger = logging.getLogger(__name__)
 
 INVALID_ACTION = "[｜INVALID_ACTION｜]"
 
+# Mapping from SPIRAL template names to tinker-cookbook renderer names
+RENDERER_NAME_MAP = {
+    "qwen3": "qwen3",
+    "octothinker": "role_colon",  # OctoThinker uses a simple format
+    "r1": "role_colon",
+    "llama_instruct": "llama3",
+}
+
+# System prompt for game tasks
+GAME_SYSTEM_PROMPT = "You are playing a two-player zero-sum game. Make valid actions to win."
+
+
+def _build_instruction(observation: str, template_name: str) -> str:
+    """Build instruction text for game observation."""
+    if template_name == "llama_instruct":
+        return (
+            f"Current Observation: {observation}\n"
+            f"Please reason step by step, and put your final answer within \\boxed{{}}."
+        )
+    elif template_name in ["octothinker", "r1"]:
+        return (
+            f"A conversation between User and Assistant. The User presents the observation of a zero-sum game, and the Assistant makes a valid action in order to win. "
+            f"The Assistant first thinks about the reasoning process in the mind and then provides the action. "
+            f"User: You must put your answer inside \\boxed{{}} "
+            f"and your final answer will be extracted automatically by the \\boxed{{}} tag.\n"
+            f"Observation: {observation}"
+        )
+    else: # Use qwen3 template
+        return (
+            f"You are playing a two-player zero-sum game. Make valid actions to win.\n"
+            f"Observation: {observation}\n"
+            f"Please reason step by step, and put your final answer within \\boxed{{}}."
+        )
 
 class SpiralRenderer(Renderer):
     """
-    Renderer for SPIRAL that uses the template system from spiral/template.py.
+    Renderer for SPIRAL that wraps tinker-cookbook renderers for game playing.
 
     This renderer is responsible for:
-    - Formatting observations into prompts using templates
+    - Using standard tinker-cookbook renderers for chat formatting
+    - Converting game observations into proper message format
     - Parsing model responses to extract actions from \\boxed{}
 
     Action validation is handled by the Environment, not the Renderer.
@@ -52,20 +84,20 @@ class SpiralRenderer(Renderer):
 
         Args:
             tokenizer: Tokenizer for encoding/decoding tokens
-            template_name: Name of template from TEMPLATE_FACTORY
+            template_name: Name of SPIRAL template (will be mapped to renderer name)
         """
         super().__init__(tokenizer)
         self.template_name = template_name
 
-        # Get template function
-        if template_name not in TEMPLATE_FACTORY:
+        # Get corresponding renderer name from tinker-cookbook
+        if template_name not in RENDERER_NAME_MAP:
             raise ValueError(
                 f"Unknown template: {template_name}. "
-                f"Available: {list(TEMPLATE_FACTORY.keys())}"
+                f"Available: {list(RENDERER_NAME_MAP.keys())}"
             )
-        self.template_fn: Callable[[str, Optional[str]], str] = TEMPLATE_FACTORY[
-            template_name
-        ]
+
+        renderer_name = RENDERER_NAME_MAP[template_name]
+        self.base_renderer = get_renderer(renderer_name, tokenizer)
 
     def build_generation_prompt(
         self,
@@ -97,29 +129,37 @@ class SpiralRenderer(Renderer):
 
         observation = last_message["content"]
 
-        # Apply template
-        formatted_prompt = self.template_fn(observation, system_prompt=None)
+        # Build instruction for game observation
+        instruction = _build_instruction(observation, self.template_name)
 
-        # Add prefill if provided
-        if prefill is not None:
-            formatted_prompt += prefill
+        # Create message list for base renderer
+        formatted_messages: list[Message] = []
 
-        # Encode to tokens
-        tokens = self.tokenizer.encode(formatted_prompt, add_special_tokens=True)
+        # Add system message for llama_instruct templates
+        if self.template_name == "llama_instruct":
+            formatted_messages.append({"role": "system", "content": GAME_SYSTEM_PROMPT})
 
-        return tinker.ModelInput.from_ints(tokens)
+        # Add user message
+        formatted_messages.append({"role": "user", "content": instruction})
+
+        # Add prefill for enforce_thinking templates
+        renderer_prefill = prefill
+
+        # Use base renderer to build the prompt
+        return self.base_renderer.build_generation_prompt(
+            formatted_messages, role=role, prefill=renderer_prefill
+        )
 
     def get_stop_sequences(self) -> list[str] | list[int]:
         """
         Get stop sequences for generation.
 
-        For TextArena games, we use "]\n" as the stop sequence since actions
-        are enclosed in square brackets.
+        Delegates to the base renderer.
 
         Returns:
-            List of stop sequences (as strings)
+            List of stop sequences (as strings or token IDs)
         """
-        return []
+        return self.base_renderer.get_stop_sequences()
 
     @weave.op()
     def parse_response(self, response: list[int]) -> tuple[Message, bool]:
@@ -135,8 +175,9 @@ class SpiralRenderer(Renderer):
         Returns:
             Tuple of (Message with extracted action, is_done flag)
         """
-        # Decode tokens to text
-        response_text = self.tokenizer.decode(response)
+        # First parse with base renderer to handle stop tokens properly
+        base_message, base_done = self.base_renderer.parse_response(response)
+        response_text = base_message["content"]
 
         # Extract action from \boxed{}
         extracted_action = extract_boxed_answer(response_text)
@@ -167,6 +208,7 @@ class SpiralRenderer(Renderer):
             formatted_action = re.sub(r"\s+", " ", formatted_action).strip()
 
             action_text = formatted_action
+
         # Create message
         message: Message = {"role": "assistant", "content": action_text}
 

@@ -29,7 +29,6 @@ from tqdm.asyncio import tqdm
 from spiral.agents.random import RandomAgent
 from spiral.agents.utils import get_valid_action_parser
 from spiral.envs import make_env
-from spiral.template import TEMPLATE_FACTORY
 from spiral.tinker.renderer import INVALID_ACTION, get_spiral_renderer
 from spiral.utils import extract_boxed_answer
 
