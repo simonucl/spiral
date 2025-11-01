@@ -13,12 +13,12 @@ Migration from OAT to Tinker framework - tracking completed work and development
 - [x] Comprehensive metrics tracking (per-player, per-trajectory, game outcomes)
 - [x] Module organization (`spiral/tinker/` with utils, train_step, etc.)
 - [x] Architecture fixes (validation in env, turn counting, metadata tracking)
+- [x] **Evaluation code**: Online eval against random/LLM opponents (`GameEvaluator`)
 
 ## TODO
 
 ### High Priority 🔴
 
-- [ ] **Evaluation code**: Online eval against random/LLM opponents during training
 - [ ] **LogTree support**: Integrate visualization from https://github.com/thinking-machines-lab/tinker-cookbook/pull/39
 
 ### Medium Priority 🟡
@@ -33,16 +33,19 @@ Migration from OAT to Tinker framework - tracking completed work and development
 
 ## Quick Reference
 
-**Training**:
+**Training with evaluation**:
 ```bash
 python train_spiral_tinker.py \
     model_name="Qwen/Qwen3-8B-Base" \
     env_ids='["TicTacToe-v0", "KuhnPoker-v1"]' \
-    use_llm_obs_wrappers='[false, true]'
+    use_llm_obs_wrappers='[false, true]' \
+    eval_every=16 \
+    eval_opponent_names="random,google/gemini-2.0-flash-exp"
 ```
 
 **Key Files**:
 - `spiral/tinker/train_step.py` - Custom training step with RAE
 - `spiral/tinker/env.py` - Two-player environment
+- `spiral/tinker/evaluator.py` - Game evaluation against opponents
 - `spiral/tinker/utils.py` - Metrics computation
 - `CUSTOM_TRAINING.md` - Detailed implementation docs
