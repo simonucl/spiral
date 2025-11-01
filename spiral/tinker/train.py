@@ -172,6 +172,7 @@ async def do_sync_training_spiral(
             tokenizer,
             env_group_builders_P,
             trajectory_groups_P,
+            sampling_client,
         )
 
         # Log metrics
