@@ -1,29 +1,25 @@
 #!/usr/bin/env python3
 """Minimal game evaluation script for Qwen/Qwen3-8B-Base."""
 
-from typing import Any, Dict
-
-
 import asyncio
 
 import tinker
-from tinker_cookbook.completers import TinkerMessageCompleter
 
 from spiral.tinker.evaluator import GameEvaluator
-from spiral.tinker.renderer import get_spiral_renderer
 
 
 async def main():
     # Configuration
     model_name = "Qwen/Qwen3-8B-Base"
     prompt_template = "qwen3"
+    base_url = None  # Set to your Tinker service URL if needed
 
     # Game evaluation settings
     eval_env_ids = ["TicTacToe-v0", "KuhnPoker-v1", "SimpleNegotiation-v2"]
     eval_use_llm_obs_wrappers = [False, True, True]
     eval_opponent_names = ["random", "google/gemini-2.0-flash-001"]
-    eval_games_per_matchup = 16
-    max_tokens = 8192
+    eval_games_per_matchup = 32
+    max_tokens = 2048
 
     print(f"Evaluating {model_name} on games...")
     print(f"Environments: {eval_env_ids}")
@@ -42,9 +38,12 @@ async def main():
         model_player_id=0,
     )
 
-    # Run evaluation
-    async with tinker.SamplingClient.from_model(model_name) as client:
-        metrics = await evaluator[Any, Any, Dict[str, Any]](client, max_tokens=max_tokens)
+    # Create Tinker service client and sampling client
+    service_client = tinker.ServiceClient(base_url=base_url)
+    sampling_client = service_client.create_sampling_client(model_path=model_name)
+
+    # Run evaluation (already runs games in parallel internally)
+    metrics = await evaluator(sampling_client, max_tokens=max_tokens)
 
     # Print results
     print("\n" + "="*70)
