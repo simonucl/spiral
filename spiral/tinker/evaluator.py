@@ -14,25 +14,120 @@
 
 """Game evaluation for SPIRAL Tinker implementation."""
 
+import asyncio
 import logging
 import random
 import time
 from collections import defaultdict
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 import weave
 
 import textarena as ta
 import tinker
 from tinker_cookbook.completers import TinkerMessageCompleter
+from tinker_cookbook.utils import ml_log
 from tqdm.asyncio import tqdm
 
 from spiral.agents.random import RandomAgent
 from spiral.agents.utils import get_valid_action_parser
 from spiral.envs import make_env
 from spiral.tinker.renderer import INVALID_ACTION, get_spiral_renderer
+from spiral.tinker.utils import convert_to_json_serializable
 from spiral.utils import extract_boxed_answer
 
 logger = logging.getLogger(__name__)
+
+
+class AsyncEvalRunner:
+    """Manages asynchronous evaluation runs that log to a separate wandb run."""
+
+    def __init__(self, eval_logger: Optional[ml_log.Logger] = None):
+        """
+        Initialize async evaluation runner.
+
+        Args:
+            eval_logger: Logger for evaluation metrics (separate from training)
+        """
+        self.eval_logger = eval_logger
+        self.running_tasks = []  # Track background evaluation tasks
+
+    async def run_eval_async(
+        self,
+        evaluators: list,
+        sampling_client: tinker.SamplingClient,
+        step: int,
+    ):
+        """
+        Run evaluations asynchronously and log to eval wandb run.
+
+        Args:
+            evaluators: List of evaluator objects to run
+            sampling_client: Tinker sampling client for inference
+            step: Training step number
+        """
+        try:
+            logger.info(f"[EVAL] Starting async evaluation at step {step}")
+            t_start = time.time()
+
+            eval_metrics = {}
+            for evaluator in evaluators:
+                metrics = await evaluator(sampling_client)
+                eval_metrics.update(metrics)
+
+            eval_metrics["eval/time"] = time.time() - t_start
+            eval_metrics = convert_to_json_serializable(eval_metrics)
+
+            # Log to separate eval wandb run
+            if self.eval_logger:
+                self.eval_logger.log_metrics(eval_metrics, step=step)
+
+            logger.info(
+                f"[EVAL] Completed async evaluation at step {step} "
+                f"in {eval_metrics['eval/time']:.2f}s"
+            )
+
+        except Exception as e:
+            logger.error(
+                f"[EVAL] Error in async evaluation at step {step}: {e}",
+                exc_info=True,
+            )
+
+    def schedule_eval(
+        self,
+        evaluators: list,
+        sampling_client: tinker.SamplingClient,
+        step: int,
+    ):
+        """
+        Schedule an evaluation to run in the background.
+
+        Args:
+            evaluators: List of evaluator objects to run
+            sampling_client: Tinker sampling client for inference
+            step: Training step number
+        """
+        # Create background task
+        task = asyncio.create_task(
+            self.run_eval_async(evaluators, sampling_client, step),
+            name=f"eval_step_{step}",
+        )
+        self.running_tasks.append((step, task))
+        logger.info(f"[EVAL] Scheduled async evaluation for step {step}")
+
+    async def wait_all(self):
+        """Wait for all running evaluation tasks to complete."""
+        if not self.running_tasks:
+            return
+
+        logger.info(
+            f"[EVAL] Waiting for {len(self.running_tasks)} "
+            "background evaluations to complete..."
+        )
+        for step, task in self.running_tasks:
+            await task
+
+        self.running_tasks.clear()
+        logger.info("[EVAL] All background evaluations completed")
 
 
 class GameEvaluator:
