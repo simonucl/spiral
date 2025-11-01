@@ -14,32 +14,131 @@
 
 """Game evaluation for SPIRAL Tinker implementation."""
 
+import asyncio
 import logging
 import random
 import time
 from collections import defaultdict
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 import weave
+import numpy as np
 
 import textarena as ta
 import tinker
 from tinker_cookbook.completers import TinkerMessageCompleter
+from tinker_cookbook.eval.evaluators import SamplingClientEvaluator
+from tinker_cookbook.utils import ml_log
+from tinker_cookbook.utils.misc_utils import dict_mean
 from tqdm.asyncio import tqdm
 
 from spiral.agents.random import RandomAgent
 from spiral.agents.utils import get_valid_action_parser
 from spiral.envs import make_env
 from spiral.tinker.renderer import INVALID_ACTION, get_spiral_renderer
+from spiral.tinker.utils import convert_to_json_serializable
 from spiral.utils import extract_boxed_answer
 
 logger = logging.getLogger(__name__)
 
 
-class GameEvaluator:
+class AsyncEvalRunner:
+    """Manages asynchronous evaluation runs that log to a separate wandb run."""
+
+    def __init__(self, eval_logger: Optional[ml_log.Logger] = None):
+        """
+        Initialize async evaluation runner.
+
+        Args:
+            eval_logger: Logger for evaluation metrics (separate from training)
+        """
+        self.eval_logger = eval_logger
+        self.running_tasks = []  # Track background evaluation tasks
+
+    async def run_eval_async(
+        self,
+        evaluators: list,
+        sampling_client: tinker.SamplingClient,
+        step: int,
+    ):
+        """
+        Run evaluations asynchronously and log to eval wandb run.
+
+        Args:
+            evaluators: List of evaluator objects to run
+            sampling_client: Tinker sampling client for inference
+            step: Training step number
+        """
+        try:
+            logger.info(f"[EVAL] Starting async evaluation at step {step}")
+            t_start = time.time()
+
+            eval_metrics = {}
+            for evaluator in evaluators:
+                metrics = await evaluator(sampling_client)
+                eval_metrics.update(metrics)
+
+            eval_metrics["eval/time"] = time.time() - t_start
+            eval_metrics = convert_to_json_serializable(eval_metrics)
+
+            # Log to separate eval wandb run
+            if self.eval_logger:
+                self.eval_logger.log_metrics(eval_metrics, step=step)
+
+            logger.info(
+                f"[EVAL] Completed async evaluation at step {step} "
+                f"in {eval_metrics['eval/time']:.2f}s"
+            )
+
+        except Exception as e:
+            logger.error(
+                f"[EVAL] Error in async evaluation at step {step}: {e}",
+                exc_info=True,
+            )
+
+    def schedule_eval(
+        self,
+        evaluators: list,
+        sampling_client: tinker.SamplingClient,
+        step: int,
+    ):
+        """
+        Schedule an evaluation to run in the background.
+
+        Args:
+            evaluators: List of evaluator objects to run
+            sampling_client: Tinker sampling client for inference
+            step: Training step number
+        """
+        # Create background task
+        task = asyncio.create_task(
+            self.run_eval_async(evaluators, sampling_client, step),
+            name=f"eval_step_{step}",
+        )
+        self.running_tasks.append((step, task))
+        logger.info(f"[EVAL] Scheduled async evaluation for step {step}")
+
+    async def wait_all(self):
+        """Wait for all running evaluation tasks to complete."""
+        if not self.running_tasks:
+            return
+
+        logger.info(
+            f"[EVAL] Waiting for {len(self.running_tasks)} "
+            "background evaluations to complete..."
+        )
+        for step, task in self.running_tasks:
+            await task
+
+        self.running_tasks.clear()
+        logger.info("[EVAL] All background evaluations completed")
+
+
+class GameEvaluator(SamplingClientEvaluator):
     """
     Evaluator for game playing against fixed opponents (random, LLM-based).
 
     Similar to OAT's SelfPlayActor.run_eval_episode() but adapted for Tinker.
+    Inherits from SamplingClientEvaluator for tinker-cookbook compatibility.
     """
 
     def __init__(
@@ -285,6 +384,52 @@ class GameEvaluator:
             logger.warning(f"Error validating action: {e}")
             return extracted_action, gen_length
 
+    def _compute_group_metrics(
+        self, results: List[Dict[str, Any]], prefix: str
+    ) -> Dict[str, Any]:
+        """Compute metrics for a group of results."""
+        if not results:
+            return {}
+
+        total = len(results)
+        metrics = {}
+
+        # Outcome rates
+        outcomes = {"win": 0, "loss": 0, "draw": 0}
+        for r in results:
+            outcomes[r["outcome"]] += 1
+
+        metrics.update({
+            f"{prefix}/win_rate": outcomes["win"] / total,
+            f"{prefix}/loss_rate": outcomes["loss"] / total,
+            f"{prefix}/draw_rate": outcomes["draw"] / total,
+            f"{prefix}/num_games": total,
+        })
+
+        # Invalid action rates
+        invalid_moves = sum(1 for r in results if r["invalid_move"])
+        invalid_by_model = sum(1 for r in results if r["invalid_move_by_model"])
+        metrics[f"{prefix}/invalid_move_rate"] = invalid_moves / total
+        metrics[f"{prefix}/model_invalid_rate"] = invalid_by_model / total
+
+        # Average continuous metrics using dict_mean
+        continuous_metrics = [
+            {"num_turns": r["num_turns"], "model_reward": r["model_reward"]}
+            for r in results
+        ]
+        avg_metrics = dict_mean(continuous_metrics)
+        metrics[f"{prefix}/avg_turns"] = avg_metrics["num_turns"]
+        metrics[f"{prefix}/avg_reward"] = avg_metrics["model_reward"]
+
+        # Generation length metrics
+        all_gen_lengths = [
+            length for r in results for length in r["model_gen_lengths"]
+        ]
+        if all_gen_lengths:
+            metrics[f"{prefix}/mean_gen_length"] = np.mean(all_gen_lengths)
+
+        return metrics
+
     def _aggregate_metrics(self, results: List[Dict[str, Any]]) -> Dict[str, Any]:
         """Aggregate results into metrics."""
         metrics = {}
@@ -302,118 +447,18 @@ class GameEvaluator:
 
         # Compute metrics per game (across all opponents for that game)
         for env_id, env_results in grouped_by_env.items():
-            prefix = f"eval/{env_id}"
-
-            # Count outcomes
-            wins = sum(1 for r in env_results if r["outcome"] == "win")
-            losses = sum(1 for r in env_results if r["outcome"] == "loss")
-            draws = sum(1 for r in env_results if r["outcome"] == "draw")
-            total = len(env_results)
-
-            metrics[f"{prefix}/win_rate"] = wins / total if total > 0 else 0.0
-            metrics[f"{prefix}/loss_rate"] = losses / total if total > 0 else 0.0
-            metrics[f"{prefix}/draw_rate"] = draws / total if total > 0 else 0.0
-            metrics[f"{prefix}/num_games"] = total
-
-            # Invalid action metrics
-            invalid_moves = sum(1 for r in env_results if r["invalid_move"])
-            invalid_by_model = sum(
-                1 for r in env_results if r["invalid_move_by_model"]
-            )
-            metrics[f"{prefix}/invalid_move_rate"] = (
-                invalid_moves / total if total > 0 else 0.0
-            )
-            metrics[f"{prefix}/model_invalid_rate"] = (
-                invalid_by_model / total if total > 0 else 0.0
-            )
-
-            # Average metrics
-            avg_turns = sum(r["num_turns"] for r in env_results) / total
-            avg_reward = sum(r["model_reward"] for r in env_results) / total
-
-            metrics[f"{prefix}/avg_turns"] = avg_turns
-            metrics[f"{prefix}/avg_reward"] = avg_reward
-
-            # Generation length metrics
-            all_gen_lengths = [
-                length
-                for r in env_results
-                for length in r["model_gen_lengths"]
-            ]
-            if len(all_gen_lengths) > 0:
-                metrics[f"{prefix}/mean_gen_length"] = sum(all_gen_lengths) / len(all_gen_lengths)
+            metrics.update(self._compute_group_metrics(env_results, f"eval/{env_id}"))
 
         # Compute metrics per matchup (env + opponent)
         for (env_id, opponent_name), matchup_results in grouped_by_matchup.items():
-            prefix = f"eval/{env_id}/{opponent_name}"
-
-            # Count outcomes
-            wins = sum(1 for r in matchup_results if r["outcome"] == "win")
-            losses = sum(1 for r in matchup_results if r["outcome"] == "loss")
-            draws = sum(1 for r in matchup_results if r["outcome"] == "draw")
-            total = len(matchup_results)
-
-            metrics[f"{prefix}/win_rate"] = wins / total if total > 0 else 0.0
-            metrics[f"{prefix}/loss_rate"] = losses / total if total > 0 else 0.0
-            metrics[f"{prefix}/draw_rate"] = draws / total if total > 0 else 0.0
-            metrics[f"{prefix}/num_games"] = total
-
-            # Invalid action metrics
-            invalid_moves = sum(1 for r in matchup_results if r["invalid_move"])
-            invalid_by_model = sum(
-                1 for r in matchup_results if r["invalid_move_by_model"]
-            )
-            metrics[f"{prefix}/invalid_move_rate"] = (
-                invalid_moves / total if total > 0 else 0.0
-            )
-            metrics[f"{prefix}/model_invalid_rate"] = (
-                invalid_by_model / total if total > 0 else 0.0
-            )
-
-            # Average metrics
-            avg_turns = sum(r["num_turns"] for r in matchup_results) / total
-            avg_reward = sum(r["model_reward"] for r in matchup_results) / total
-
-            metrics[f"{prefix}/avg_turns"] = avg_turns
-            metrics[f"{prefix}/avg_reward"] = avg_reward
-
-            # Generation length metrics
-            all_gen_lengths = [
-                length
-                for r in matchup_results
-                for length in r["model_gen_lengths"]
-            ]
-            if len(all_gen_lengths) > 0:
-                metrics[f"{prefix}/mean_gen_length"] = sum(all_gen_lengths) / len(all_gen_lengths)
-
-        # Compute overall metrics (averaged across all games and opponents)
-        if results:
-            total_games = len(results)
-            metrics["eval/overall/win_rate"] = (
-                sum(1 for r in results if r["outcome"] == "win") / total_games
-            )
-            metrics["eval/overall/loss_rate"] = (
-                sum(1 for r in results if r["outcome"] == "loss") / total_games
-            )
-            metrics["eval/overall/draw_rate"] = (
-                sum(1 for r in results if r["outcome"] == "draw") / total_games
-            )
-            metrics["eval/overall/model_invalid_rate"] = (
-                sum(1 for r in results if r["invalid_move_by_model"]) / total_games
-            )
-            metrics["eval/overall/avg_turns"] = (
-                sum(r["num_turns"] for r in results) / total_games
-            )
-
-            # Overall generation length metrics
-            all_gen_lengths = [
-                length
-                for r in results
-                for length in r["model_gen_lengths"]
-            ]
-            if len(all_gen_lengths) > 0:
-                metrics["eval/overall/mean_gen_length"] = (
-                    sum(all_gen_lengths) / len(all_gen_lengths)
+            metrics.update(
+                self._compute_group_metrics(
+                    matchup_results, f"eval/{env_id}/{opponent_name}"
                 )
+            )
+
+        # Compute overall metrics
+        if results:
+            metrics.update(self._compute_group_metrics(results, "eval/overall"))
 
         return metrics

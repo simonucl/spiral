@@ -16,6 +16,8 @@
 
 from typing import Any, Dict
 
+from tinker_cookbook.utils.misc_utils import dict_mean, safezip
+
 
 def compute_trajectory_metrics(trajectory_groups, prefix: str = "train") -> Dict[str, Any]:
     """
@@ -59,9 +61,6 @@ def compute_trajectory_metrics(trajectory_groups, prefix: str = "train") -> Dict
 
     if len(game_lengths) > 0:
         metrics[f"{prefix}/mean_turns_per_trajectory"] = np.mean(game_lengths)
-        metrics[f"{prefix}/std_turns_per_trajectory"] = np.std(game_lengths)
-        metrics[f"{prefix}/max_turns_per_trajectory"] = np.max(game_lengths)
-        metrics[f"{prefix}/min_turns_per_trajectory"] = np.min(game_lengths)
 
     # Compute per-role statistics (generalized for any number of players)
     player_rewards = defaultdict(list)

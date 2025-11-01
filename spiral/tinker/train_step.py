@@ -22,6 +22,7 @@ import numpy as np
 import tinker
 import torch
 from tinker import AdamParams, TensorData, types
+from tinker_cookbook.rl.metrics import compute_post_kl
 from tinker_cookbook.rl.types import (EnvGroupBuilder, TrajectoryGroup,
                                       Transition)
 from tinker_cookbook.tokenizer_utils import Tokenizer
@@ -40,6 +41,7 @@ async def train_step(
     tokenizer: Tokenizer,
     env_group_builders_P: Sequence[EnvGroupBuilder],
     trajectory_groups_P: list[TrajectoryGroup],
+    sampling_client: tinker.SamplingClient | None = None,
 ) -> dict[str, Any]:
     """
     Custom training step for SPIRAL with RAE-based advantage computation.
@@ -291,5 +293,11 @@ async def train_step(
             metrics["train/overall/draw_rate"] = overall_outcomes["draw"] / total_overall
 
     metrics["time/train_total"] = time.time() - t_start
+
+    # Optional: Compute post-update KL divergence
+    if cfg.compute_post_kl and sampling_client is not None:
+        with timed("compute_post_kl", metrics):
+            post_kl_metrics = await compute_post_kl(training_datums, sampling_client)
+            metrics.update(post_kl_metrics)
 
     return metrics

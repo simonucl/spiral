@@ -17,6 +17,7 @@
 import asyncio
 import logging
 import time
+from typing import Optional
 
 import tinker
 from tinker_cookbook import checkpoint_utils
@@ -29,12 +30,12 @@ from tinker_cookbook.utils import ml_log
 from tinker_cookbook.utils.misc_utils import timed
 from tinker_cookbook.utils.trace import scope
 
-from spiral.tinker.utils import convert_to_json_serializable
-from tqdm.asyncio import tqdm
-
 from spiral.tinker.env import SpiralTwoPlayerEnvGroupBuilder
+from spiral.tinker.evaluator import AsyncEvalRunner
 from spiral.tinker.rollouts import do_group_rollout_with_draw_retry
 from spiral.tinker.train_step import train_step as spiral_train_step
+from spiral.tinker.utils import convert_to_json_serializable
+from tqdm.asyncio import tqdm
 
 logger = logging.getLogger(__name__)
 
@@ -91,6 +92,7 @@ async def do_sync_training_spiral(
     evaluators: list,
     dataset: RLDataset,
     ml_logger: ml_log.Logger,
+    eval_runner: Optional[AsyncEvalRunner],
     tokenizer: Tokenizer,
 ):
     """
@@ -108,7 +110,8 @@ async def do_sync_training_spiral(
         service_client: Tinker service client
         evaluators: List of evaluators
         dataset: RL dataset
-        ml_logger: Logger for metrics
+        ml_logger: Logger for metrics (training)
+        eval_runner: Async eval runner for background evaluations
         tokenizer: Tokenizer
     """
     for i_batch in range(start_batch, end_batch):
@@ -134,14 +137,9 @@ async def do_sync_training_spiral(
         }
         t_start = time.time()
 
-        # Run evaluations
-        if cfg.eval_every > 0 and i_batch % cfg.eval_every == 0:
-            with timed("run_evals", metrics):
-                for evaluator in evaluators:
-                    eval_metrics = await evaluator(
-                        sampling_client
-                    )
-                    metrics.update(eval_metrics)
+        # Schedule evaluations to run asynchronously in background
+        if cfg.eval_every > 0 and i_batch % cfg.eval_every == 0 and eval_runner:
+            eval_runner.schedule_eval(evaluators, sampling_client, i_batch)
 
         # Get batch and sample trajectories
         env_group_builders_P = dataset.get_batch(i_batch)
@@ -174,6 +172,7 @@ async def do_sync_training_spiral(
             tokenizer,
             env_group_builders_P,
             trajectory_groups_P,
+            sampling_client,
         )
 
         # Log metrics
@@ -193,12 +192,27 @@ async def create_spiral_train_loop(cfg: train.Config):
     Args:
         cfg: Training configuration
     """
+    # Setup training logger
     ml_logger = ml_log.setup_logging(
         log_dir=cfg.log_path,
         wandb_project=cfg.wandb_project,
         config=cfg,
         wandb_name=cfg.wandb_name,
     )
+
+    # Setup separate eval logger with "_eval" suffix
+    eval_logger = None
+    eval_runner = None
+    if cfg.eval_every > 0 and cfg.wandb_project:
+        eval_wandb_name = f"{cfg.wandb_name}_eval" if cfg.wandb_name else None
+        eval_logger = ml_log.WandbLogger(
+            project=cfg.wandb_project,
+            config=cfg,
+            log_dir=cfg.log_path,
+            wandb_name=eval_wandb_name,
+        )
+        eval_runner = AsyncEvalRunner(eval_logger)
+        logger.info(f"[EVAL] Created separate wandb run for evaluations: {eval_wandb_name}")
 
     logging.getLogger("httpx").setLevel(logging.WARNING)
     logging.getLogger("pylatexenc").setLevel(logging.WARNING)
@@ -228,8 +242,11 @@ async def create_spiral_train_loop(cfg: train.Config):
 
     # Create dataset from thunk
     dataset, maybe_test_dataset = await cfg.dataset_builder()
-    # evaluators = [evaluator() for evaluator in cfg.evaluator_builders]
-    evaluators = []
+
+    # Create evaluators from builders (includes GameEvaluator)
+    evaluators = [evaluator() for evaluator in cfg.evaluator_builders]
+
+    # Add math test evaluator if test dataset provided
     if maybe_test_dataset is not None:
         from tinker_cookbook.rl.metric_util import RLTestSetEvaluator
 
@@ -261,8 +278,13 @@ async def create_spiral_train_loop(cfg: train.Config):
             evaluators=evaluators,
             dataset=dataset,
             ml_logger=ml_logger,
+            eval_runner=eval_runner,
             tokenizer=tokenizer,
         )
+
+    # Wait for all background evaluations to complete before finishing
+    if eval_runner:
+        await eval_runner.wait_all()
 
     # Save final checkpoint
     if start_batch < num_batches:
@@ -278,4 +300,6 @@ async def create_spiral_train_loop(cfg: train.Config):
 
     # Cleanup
     ml_logger.close()
+    if eval_logger:
+        eval_logger.close()
     logger.info("Training completed successfully")
