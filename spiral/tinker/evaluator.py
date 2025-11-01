@@ -232,15 +232,10 @@ class GameEvaluator:
             Tuple of (action_string, generation_length)
         """
         # Format observation with template
-        formatted_observation = TEMPLATE_FACTORY[self.prompt_template](
-            observation, system_prompt=None
+        renderer = get_spiral_renderer(self.model_name, self.prompt_template)
+        model_input = renderer.build_generation_prompt(
+            [{"role": "user", "content": observation}],
         )
-
-        # Get model response - need to access the sampling client directly to get token count
-        messages = [{"role": "user", "content": formatted_observation}]
-
-        # Build the generation prompt
-        model_input = policy.renderer.build_generation_prompt(messages)
 
         # Sample directly to get token information
         response = await policy.sampling_client.sample_async(

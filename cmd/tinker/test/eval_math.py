@@ -9,7 +9,9 @@ from tinker_cookbook import renderers
 from tinker_cookbook.tokenizer_utils import get_tokenizer
 from tinker_cookbook.recipes.math_rl.math_grading import extract_boxed
 from tqdm.asyncio import tqdm
+import wandb
 
+wandb.init(project="spiral", name="qwen3-8b-math-eval")
 
 async def evaluate_single_problem(
     sampling_client: tinker.SamplingClient,
@@ -29,7 +31,7 @@ async def evaluate_single_problem(
         num_samples=1,
         sampling_params=tinker.SamplingParams(
             temperature=0.0,
-            max_tokens=2048,
+            max_tokens=16384,
         ),
     )
 
@@ -38,7 +40,10 @@ async def evaluate_single_problem(
     model_answer = parsed_message["content"]
 
     # Grade answer
-    extracted_answer = extract_boxed(model_answer)
+    try:
+        extracted_answer = extract_boxed(model_answer)
+    except ValueError:
+        return False
     correct_answer = str(answer) if isinstance(answer, (int, float)) else answer
 
     return extracted_answer == correct_answer
@@ -46,8 +51,8 @@ async def evaluate_single_problem(
 
 async def main():
     # Configuration
-    model_name = "Qwen/Qwen3-8B-Base"
-    renderer_name = "qwen3_instruct"
+    model_name = "Qwen/Qwen3-8B"
+    renderer_name = "qwen3"
     data_path = "data/aime"  # Change to your data path
     base_url = None  # Set to your Tinker service URL if needed
 
@@ -63,7 +68,7 @@ async def main():
     # Create Tinker service client and sampling client
     print(f"Connecting to model {model_name}...")
     service_client = tinker.ServiceClient(base_url=base_url)
-    sampling_client = service_client.create_sampling_client(model_path=model_name)
+    sampling_client = service_client.create_sampling_client(base_model=model_name)
 
     # Evaluate all problems in parallel
     print("Evaluating problems...")
