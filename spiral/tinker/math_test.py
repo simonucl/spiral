@@ -33,15 +33,52 @@ logger = logging.getLogger(__name__)
 class SpiralMathTestEnv(MathEnv):
     """
     Environment for SPIRAL math test problems.
+
+    Always works with a list of acceptable answers internally.
+    Single answers are converted to single-element lists.
     """
 
     def __init__(
-        self, problem: str, answer: str, renderer: renderers.Renderer, convo_prefix: list[renderers.Message] | None = None):
-        super().__init__(problem, answer, renderer, convo_prefix)
+        self,
+        problem: str,
+        answer_candidates: list[str],  # Always a list now
+        renderer: renderers.Renderer,
+        convo_prefix: list[renderers.Message] | None = None
+    ):
+        """
+        Initialize math environment with list of acceptable answers.
+
+        Args:
+            problem: The math problem text
+            answer_candidates: List of acceptable answers (any match = correct)
+            renderer: Renderer for formatting prompts
+            convo_prefix: Optional conversation prefix
+        """
+        # Store all acceptable answers
+        self.answer_candidates = answer_candidates
+
+        # Pass first answer to parent for compatibility
+        answer_str = answer_candidates[0] if answer_candidates else ""
+        super().__init__(problem, answer_str, renderer, convo_prefix)
 
     @classmethod
     def question_suffix(cls) -> str:
         return " Please reason step by step, and put your final answer within \\boxed{}."
+
+    def grade_answer(self, answer: str) -> bool:
+        """
+        Grade an answer against all acceptable answers.
+
+        Returns True if the given answer matches ANY of the acceptable answers.
+        """
+        from tinker_cookbook.recipes.math_rl.math_env import safe_grade
+
+        # Try matching against each acceptable answer
+        for gold_answer in self.answer_candidates:
+            if safe_grade(answer, gold_answer, self.grader, self.timeout):
+                return True
+
+        return False
 
 class SpiralMathTestDataset(RLDataset):
     """
@@ -93,16 +130,32 @@ class SpiralMathTestDataset(RLDataset):
             logger.warning(f"Missing problem or answer: {x}")
             return None
 
-        # Convert answer to string if it's a number (float/int)
-        if isinstance(answer, (int, float)):
-            answer = str(answer)
+        # Normalize answer to list of strings (unified representation)
+        answer_candidates = self._normalize_to_list(answer)
 
         return ProblemGroupBuilder(
             env_thunk=partial(
-                SpiralMathTestEnv, problem, answer, self.renderer, convo_prefix=None
+                SpiralMathTestEnv, problem, answer_candidates, self.renderer, convo_prefix=None
             ),
             num_envs=group_size,
         )
+
+    @staticmethod
+    def _normalize_to_list(answer) -> list[str]:
+        """
+        Normalize answer to list of string candidates.
+
+        Handles:
+        - Single values (str, int, float) -> [str(value)]
+        - Lists -> [str(item) for item in list]
+        - Nested lists -> flattened list of strings
+        """
+        if isinstance(answer, list):
+            # Flatten nested lists and convert all to strings
+            result = [str(item) for item in answer]
+        else:
+            result = [str(answer)]
+        return result
 
 
 @chz.chz
