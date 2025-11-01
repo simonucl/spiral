@@ -17,7 +17,29 @@
 from typing import Any, Dict
 
 from tinker_cookbook.utils.misc_utils import dict_mean, safezip
+from tinker_cookbook.utils.ml_log import WandbLogger, dump_config
+from pathlib import Path
+import os
+import wandb
 
+class WandbLoggerWithReinit(WandbLogger):
+    def __init__(
+        self,
+        project: str | None = None,
+        config: Any | None = None,
+        log_dir: str | Path | None = None,
+        wandb_name: str | None = None,
+        reinit: str = "default",
+    ):
+        # Initialize wandb run
+        assert wandb is not None  # For type checker
+        self.run = wandb.init(
+            project=project,
+            config=dump_config(config) if config else None,
+            dir=str(log_dir) if log_dir else None,
+            name=wandb_name,
+            reinit=reinit,
+        )
 
 def compute_trajectory_metrics(trajectory_groups, prefix: str = "train") -> Dict[str, Any]:
     """

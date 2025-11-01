@@ -89,15 +89,9 @@ class SpiralRenderer(Renderer):
         super().__init__(tokenizer)
         self.template_name = template_name
 
-        # Get corresponding renderer name from tinker-cookbook
-        if template_name not in RENDERER_NAME_MAP:
-            raise ValueError(
-                f"Unknown template: {template_name}. "
-                f"Available: {list(RENDERER_NAME_MAP.keys())}"
-            )
-
-        renderer_name = RENDERER_NAME_MAP[template_name]
-        self.base_renderer = get_renderer(renderer_name, tokenizer)
+        if template_name in RENDERER_NAME_MAP:
+            template_name = RENDERER_NAME_MAP[template_name]
+        self.base_renderer = get_renderer(template_name, tokenizer)
 
     def build_generation_prompt(
         self,

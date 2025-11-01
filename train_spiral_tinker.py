@@ -192,7 +192,7 @@ def build_config(cli_config: SpiralConfig) -> train.Config:
         math_test_builder = SpiralMathTestDatasetBuilder(
             data_paths=math_test_data_paths,
             model_name_for_tokenizer=cli_config.model_name,
-            renderer_name="qwen3_instruct"
+            renderer_name=cli_config.renderer_name
         )
 
         # Create a wrapper that returns both game training data and math test data

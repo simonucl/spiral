@@ -409,8 +409,8 @@ class GameEvaluator(SamplingClientEvaluator):
         # Invalid action rates
         invalid_moves = sum(1 for r in results if r["invalid_move"])
         invalid_by_model = sum(1 for r in results if r["invalid_move_by_model"])
-        metrics[f"{prefix}/invalid_move_rate"] = invalid_moves / total
-        metrics[f"{prefix}/model_invalid_rate"] = invalid_by_model / total
+        metrics[f"{prefix}/invalid_move_rate"] = invalid_moves * 2 / total
+        metrics[f"{prefix}/model_invalid_rate"] = invalid_by_model * 2 / total
 
         # Average continuous metrics using dict_mean
         continuous_metrics = [

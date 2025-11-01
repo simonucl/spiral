@@ -34,7 +34,7 @@ from spiral.tinker.env import SpiralTwoPlayerEnvGroupBuilder
 from spiral.tinker.evaluator import AsyncEvalRunner
 from spiral.tinker.rollouts import do_group_rollout_with_draw_retry
 from spiral.tinker.train_step import train_step as spiral_train_step
-from spiral.tinker.utils import convert_to_json_serializable
+from spiral.tinker.utils import convert_to_json_serializable, WandbLoggerWithReinit
 from tqdm.asyncio import tqdm
 
 logger = logging.getLogger(__name__)
@@ -140,6 +140,10 @@ async def do_sync_training_spiral(
         # Schedule evaluations to run asynchronously in background
         if cfg.eval_every > 0 and i_batch % cfg.eval_every == 0 and eval_runner:
             eval_runner.schedule_eval(evaluators, sampling_client, i_batch)
+            await eval_runner.wait_all()
+            logger.info("Evaluations completed")
+            import sys
+            sys.exit(1)
 
         # Get batch and sample trajectories
         env_group_builders_P = dataset.get_batch(i_batch)
@@ -205,11 +209,12 @@ async def create_spiral_train_loop(cfg: train.Config):
     eval_runner = None
     if cfg.eval_every > 0 and cfg.wandb_project:
         eval_wandb_name = f"{cfg.wandb_name}_eval" if cfg.wandb_name else None
-        eval_logger = ml_log.WandbLogger(
+        eval_logger = WandbLoggerWithReinit(
             project=cfg.wandb_project,
             config=cfg,
             log_dir=cfg.log_path,
             wandb_name=eval_wandb_name,
+            reinit="create_new",
         )
         eval_runner = AsyncEvalRunner(eval_logger)
         logger.info(f"[EVAL] Created separate wandb run for evaluations: {eval_wandb_name}")
@@ -251,7 +256,7 @@ async def create_spiral_train_loop(cfg: train.Config):
         from tinker_cookbook.rl.metric_util import RLTestSetEvaluator
 
         evaluators.append(
-            RLTestSetEvaluator(maybe_test_dataset, max_tokens=cfg.max_tokens)
+            RLTestSetEvaluator(maybe_test_dataset, max_tokens=cfg.max_tokens, name="math_test_set")
         )
 
     num_batches = len(dataset)
