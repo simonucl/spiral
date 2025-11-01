@@ -61,7 +61,9 @@ class AsyncEvalRunner:
         step: int,
     ):
         """
-        Run evaluations asynchronously and log to eval wandb run.
+        Run evaluations asynchronously in parallel and log to eval wandb run.
+
+        All evaluators run concurrently for maximum performance.
 
         Args:
             evaluators: List of evaluator objects to run
@@ -69,15 +71,34 @@ class AsyncEvalRunner:
             step: Training step number
         """
         try:
-            logger.info(f"[EVAL] Starting async evaluation at step {step}")
+            logger.info(
+                f"[EVAL] Starting {len(evaluators)} parallel evaluations at step {step}"
+            )
+            for evaluator in evaluators:
+                logger.info(f"[EVAL] Evaluator: {evaluator}")
             t_start = time.time()
 
+            # Run all evaluators in parallel
+            eval_results = await asyncio.gather(
+                *[evaluator(sampling_client) for evaluator in evaluators],
+                return_exceptions=True
+            )
+
+            # Aggregate metrics from all evaluators
             eval_metrics = {}
-            for evaluator in evaluators:
-                metrics = await evaluator(sampling_client)
-                eval_metrics.update(metrics)
+            for i, result in enumerate(eval_results):
+                if isinstance(result, Exception):
+                    logger.error(
+                        f"[EVAL] Evaluator {i} failed: {result}",
+                        exc_info=result
+                    )
+                elif isinstance(result, dict):
+                    eval_metrics.update(result)
+                else:
+                    logger.warning(f"[EVAL] Evaluator {i} returned non-dict: {type(result)}")
 
             eval_metrics["eval/time"] = time.time() - t_start
+            eval_metrics["eval/num_evaluators"] = len(evaluators)
             eval_metrics = convert_to_json_serializable(eval_metrics)
 
             # Log to separate eval wandb run
@@ -85,7 +106,7 @@ class AsyncEvalRunner:
                 self.eval_logger.log_metrics(eval_metrics, step=step)
 
             logger.info(
-                f"[EVAL] Completed async evaluation at step {step} "
+                f"[EVAL] Completed {len(evaluators)} parallel evaluations at step {step} "
                 f"in {eval_metrics['eval/time']:.2f}s"
             )
 
