@@ -163,50 +163,8 @@ def build_config(cli_config: SpiralConfig) -> train.Config:
     else:
         wandb_name = run_name
 
-    # Create dataset builder
-    # If math test eval is enabled, wrap both game and math datasets
-    if cli_config.enable_math_test_eval and math_test_data_paths:
-        # Create game dataset builder
-        game_dataset_builder = SpiralRLDatasetBuilder(
-            batch_size=cli_config.batch_size,
-            num_train_datapoints=cli_config.num_train_datapoints,
-            num_test_datapoints=cli_config.num_test_datapoints,
-            model_name=cli_config.model_name,
-            renderer_name=cli_config.renderer_name,
-            env_ids=cli_config.env_ids,
-            use_llm_obs_wrappers=cli_config.use_llm_obs_wrappers,
-            template_overrides=template_overrides,
-            filter_draw=cli_config.filter_draw,
-            max_draw_retries=cli_config.max_draw_retries,
-            use_role_baseline=cli_config.use_role_baseline,
-            role_baseline_ema_gamma=cli_config.role_baseline_ema_gamma,
-            use_intermediate_rewards=cli_config.use_intermediate_rewards,
-            gamma=cli_config.gamma,
-            eval_env_ids=eval_env_ids,
-            eval_use_llm_obs_wrappers=eval_use_llm_obs_wrappers,
-            eval_opponent_names=eval_opponent_names,
-            base_url=cli_config.base_url,
-        )
-
-        # Create math test dataset builder
-        math_test_builder = SpiralMathTestDatasetBuilder(
-            data_paths=math_test_data_paths,
-            model_name_for_tokenizer=cli_config.model_name,
-            renderer_name=cli_config.renderer_name
-        )
-
-        # Create a wrapper that returns both game training data and math test data
-        async def combined_dataset_builder():
-            game_train, game_test = await game_dataset_builder()
-            _, math_test = await math_test_builder()
-            # Return game training data and math test data
-            return (game_train, math_test)
-
-        dataset_builder = combined_dataset_builder
-        logger.info(f"Math test evaluation enabled with datasets: {math_test_data_paths}")
-    else:
-        # Just use game dataset builder
-        dataset_builder = SpiralRLDatasetBuilder(
+    # Create dataset builder (always game-based for training)
+    dataset_builder = SpiralRLDatasetBuilder(
             batch_size=cli_config.batch_size,
             num_train_datapoints=cli_config.num_train_datapoints,
             num_test_datapoints=cli_config.num_test_datapoints,
@@ -242,11 +200,20 @@ def build_config(cli_config: SpiralConfig) -> train.Config:
     evaluator_builders = []
     if cli_config.eval_every > 0:
         # Add game evaluator
-        # If using combined dataset builder, need to access the game builder
+        evaluator_builders.append(lambda: dataset_builder.create_evaluator())
+
+        # Add math test evaluators (one per dataset)
         if cli_config.enable_math_test_eval and math_test_data_paths:
-            evaluator_builders.append(lambda: game_dataset_builder.create_evaluator())
-        else:
-            evaluator_builders.append(lambda: dataset_builder.create_evaluator())
+            math_test_builder = SpiralMathTestDatasetBuilder(
+                data_paths=math_test_data_paths,
+                model_name_for_tokenizer=cli_config.model_name,
+                renderer_name=cli_config.renderer_name,
+                max_tokens=cli_config.max_tokens
+            )
+            # Create separate evaluators for each math dataset
+            math_evaluators = math_test_builder.create_evaluators()
+            evaluator_builders.extend([lambda e=evaluator: e for evaluator in math_evaluators])
+            logger.info(f"Math test evaluation enabled with {len(math_evaluators)} datasets: {math_test_data_paths}")
 
     config = chz.replace(cli_config,
         dataset_builder=dataset_builder,

@@ -248,16 +248,9 @@ async def create_spiral_train_loop(cfg: train.Config):
     # Create dataset from thunk
     dataset, maybe_test_dataset = await cfg.dataset_builder()
 
-    # Create evaluators from builders (includes GameEvaluator)
+    # Create evaluators from builders (includes GameEvaluator + MathTestEvaluators)
+    # Math test evaluators are now created separately, one per dataset
     evaluators = [evaluator() for evaluator in cfg.evaluator_builders]
-
-    # Add math test evaluator if test dataset provided
-    if maybe_test_dataset is not None:
-        from tinker_cookbook.rl.metric_util import RLTestSetEvaluator
-
-        evaluators.append(
-            RLTestSetEvaluator(maybe_test_dataset, max_tokens=cfg.max_tokens, name="math_test_set")
-        )
 
     num_batches = len(dataset)
     logger.info(f"Will train on {num_batches} batches")

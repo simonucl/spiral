@@ -161,23 +161,38 @@ class SpiralMathTestDataset(RLDataset):
 @chz.chz
 class SpiralMathTestDatasetBuilder(RLDatasetBuilder):
     """
-    Builder for creating SPIRAL math test datasets.
+    Builder for creating SPIRAL math test evaluators.
 
-    Can load from multiple dataset splits (aime, amc, math, minerva, olympiad_bench).
+    Creates separate evaluators for each math dataset path instead of concatenating.
+    This allows separate tracking of metrics per benchmark (AIME, AMC, MATH, etc.).
     """
 
     data_paths: list[str] | str  # Can be single path or list of paths
     model_name_for_tokenizer: str
     renderer_name: str
+    max_tokens: int
 
-    async def __call__(self) -> tuple[None, RLDataset]:
+    async def __call__(self) -> tuple[None, None]:
         """
-        Build math test dataset(s).
+        Build math test evaluators.
+
+        Note: This returns (None, None) because we don't provide datasets.
+        Instead, use create_evaluators() to get separate evaluators for each benchmark.
 
         Returns:
-            Tuple of (None, test_dataset) since we only provide test data,
-            not training data (training uses self-play games).
+            Tuple of (None, None)
         """
+        # Math test evaluation now happens via separate evaluators, not datasets
+        return (None, None)
+
+    def create_evaluators(self) -> list:
+        """
+        Create separate evaluators for each math dataset path.
+
+        Returns:
+            List of MathTestEvaluator objects, one per dataset path
+        """
+        from tinker_cookbook.rl.metric_util import RLTestSetEvaluator
 
         tokenizer = get_tokenizer(self.model_name_for_tokenizer)
         renderer = renderers.get_renderer(self.renderer_name, tokenizer=tokenizer)
@@ -185,59 +200,23 @@ class SpiralMathTestDatasetBuilder(RLDatasetBuilder):
         # Handle single path or multiple paths
         paths = [self.data_paths] if isinstance(self.data_paths, str) else self.data_paths
 
-        if len(paths) == 1:
-            # Single dataset
+        evaluators = []
+        for path in paths:
+            # Extract dataset name from path (e.g., "data/aime" -> "aime")
+            dataset_name = path.rstrip('/').split('/')[-1]
+
+            # Create dataset
             test_dataset = SpiralMathTestDataset(
-                data_path=paths[0],
-                renderer=renderer,
-            )
-        else:
-            # Multiple datasets - concatenate them
-            test_dataset = ConcatenatedMathTestDataset(
-                data_paths=paths,
-                renderer=renderer,
-            )
-
-        # Return (None, test_dataset) - no training dataset, only test
-        return (None, test_dataset)
-
-
-class ConcatenatedMathTestDataset(RLDataset):
-    """
-    Concatenates multiple SPIRAL math test datasets.
-
-    This allows evaluating on multiple benchmarks (e.g., AIME + AMC + MATH).
-    """
-
-    def __init__(
-        self,
-        data_paths: list[str],
-        renderer: renderers.Renderer,
-    ):
-        """
-        Initialize concatenated test dataset.
-
-        Args:
-            data_paths: List of dataset directory paths
-            renderer: Renderer for formatting prompts
-        """
-        self.datasets = [
-            SpiralMathTestDataset(
                 data_path=path,
                 renderer=renderer,
             )
-            for path in data_paths
-        ]
 
-    def get_batch(self, index: int) -> Sequence[EnvGroupBuilder]:
-        """Get all problems from all datasets (parallel evaluation)."""
-        if index > 0:
-            return []
-        builders = []
-        for dataset in self.datasets:
-            builders.extend(dataset.get_batch(0))
-        return builders
+            # Wrap in RLTestSetEvaluator with unique name for separate metrics
+            evaluator = RLTestSetEvaluator(
+                dataset=test_dataset,
+                max_tokens=self.max_tokens,  # Default, can be overridden
+                name=f"eval/math/{dataset_name}"  # e.g., "eval/math/aime"
+            )
+            evaluators.append(evaluator)
 
-    def __len__(self) -> int:
-        """Total number of batches across all datasets."""
-        return 1  # All problems evaluated in parallel
+        return evaluators
