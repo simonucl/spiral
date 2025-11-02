@@ -39,7 +39,7 @@ from spiral.tinker.utils import convert_to_json_serializable
 from spiral.utils import extract_boxed_answer
 
 logger = logging.getLogger(__name__)
-
+logger.setLevel(logging.DEBUG)
 
 class AsyncEvalRunner:
     """Manages asynchronous evaluation runs that log to a separate wandb run."""

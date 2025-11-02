@@ -21,6 +21,66 @@ from tinker_cookbook.utils.ml_log import WandbLogger, dump_config
 from pathlib import Path
 import os
 import wandb
+from tinker_cookbook.utils.ml_log import Logger, configure_logging_module
+from tinker_cookbook.utils.ml_log import JsonLogger, PrettyPrintLogger, WandbLogger, NeptuneLogger, TrackioLogger, MultiplexLogger
+
+def setup_logging(
+    log_dir: str,
+    wandb_project: str | None = None,
+    wandb_name: str | None = None,
+    config: Any | None = None,
+    do_configure_logging_module: bool = True,
+    reinit: str = "create_new",
+) -> Logger:
+    """
+    Set up logging infrastructure with multiple backends.
+
+    Args:
+        log_dir: Directory for logs
+        wandb_project: W&B project name (if None, W&B logging is skipped)
+        wandb_name: W&B run name
+        config: Configuration object to log
+        do_configure_logging_module: Whether to configure the logging module
+
+    Returns:
+        MultiplexLogger that combines all enabled loggers
+    """
+    # Create log directory
+    log_dir_path = Path(log_dir).expanduser()
+    log_dir_path.mkdir(parents=True, exist_ok=True)
+
+    # Initialize loggers
+    loggers = []
+
+    # Always add JSON logger
+    loggers.append(JsonLogger(log_dir_path))
+
+    # Always add pretty print logger
+    loggers.append(PrettyPrintLogger())
+
+    # Add W&B logger if available and configured
+    if wandb_project:
+        loggers.append(
+            WandbLoggerWithReinit(
+                project=wandb_project,
+                config=config,
+                log_dir=log_dir_path,
+                wandb_name=wandb_name,
+                reinit=reinit,
+            )
+        )
+
+    # Create multiplex logger
+    ml_logger = MultiplexLogger(loggers)
+
+    # Log initial configuration
+    if config is not None:
+        ml_logger.log_hparams(config)
+
+    if do_configure_logging_module:
+        configure_logging_module(str(log_dir_path / "logs.log"))
+
+    return ml_logger
 
 class WandbLoggerWithReinit(WandbLogger):
     def __init__(
@@ -40,6 +100,21 @@ class WandbLoggerWithReinit(WandbLogger):
             name=wandb_name,
             reinit=reinit,
         )
+
+    def log_hparams(self, config: Any) -> None:
+        """Log hyperparameters to wandb."""
+        if self.run and wandb is not None:
+            self.run.config.update(dump_config(config), allow_val_change=True)
+
+    def log_metrics(self, metrics: Dict[str, Any], step: int | None = None) -> None:
+        """Log metrics to wandb."""
+        if self.run and wandb is not None:
+            self.run.log(metrics, step=step)
+
+    def close(self) -> None:
+        """Close wandb run."""
+        if self.run and wandb is not None:
+            self.run.finish()
 
 def compute_trajectory_metrics(trajectory_groups, prefix: str = "train") -> Dict[str, Any]:
     """

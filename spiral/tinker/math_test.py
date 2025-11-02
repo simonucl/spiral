@@ -26,9 +26,16 @@ from tinker_cookbook.recipes.math_rl.math_env import MathEnv, extract_boxed
 from tinker_cookbook.recipes.math_rl.math_grading import extract_boxed as extract_boxed_grading
 from tinker_cookbook.rl.problem_env import ProblemGroupBuilder
 from tinker_cookbook.rl.types import EnvGroupBuilder, RLDataset, RLDatasetBuilder
+from tinker_cookbook.rl.metric_util import RLTestSetEvaluator, compute_trajectory_metrics
 from tinker_cookbook.tokenizer_utils import get_tokenizer
+from tqdm.asyncio import tqdm
+import tinker
+from tinker_cookbook.completers import TinkerTokenCompleter
+from tinker_cookbook.rl.rollouts import do_group_rollout
 
 logger = logging.getLogger(__name__)
+
+logger.setLevel(logging.DEBUG)
 
 class SpiralMathTestEnv(MathEnv):
     """
@@ -157,6 +164,25 @@ class SpiralMathTestDataset(RLDataset):
             result = [str(answer)]
         return result
 
+class MathTestEvaluator(RLTestSetEvaluator):
+    """
+    Evaluator for SPIRAL math test problems.
+    """
+
+    def __init__(self, dataset: SpiralMathTestDataset, max_tokens: int, name: str | None = None):
+        super().__init__(dataset, max_tokens, name)
+
+    async def __call__(self, sampling_client: tinker.SamplingClient) -> dict[str, float]:
+        policy = TinkerTokenCompleter(sampling_client, max_tokens=self.max_tokens)
+        trajectory_groups_P = await tqdm.gather(
+            *[do_group_rollout(builder, policy) for builder in self.env_group_builders_P],
+            desc=f"Evaluating {self.name}",
+        )
+        taglist_P = [builder.logging_tags() for builder in self.env_group_builders_P]
+        metrics = compute_trajectory_metrics(trajectory_groups_P, taglist_P)
+        if self.name is not None:
+            metrics = {f"{self.name}/{k}": v for k, v in metrics.items()}
+        return metrics
 
 @chz.chz
 class SpiralMathTestDatasetBuilder(RLDatasetBuilder):
@@ -192,8 +218,6 @@ class SpiralMathTestDatasetBuilder(RLDatasetBuilder):
         Returns:
             List of MathTestEvaluator objects, one per dataset path
         """
-        from tinker_cookbook.rl.metric_util import RLTestSetEvaluator
-
         tokenizer = get_tokenizer(self.model_name_for_tokenizer)
         renderer = renderers.get_renderer(self.renderer_name, tokenizer=tokenizer)
 
@@ -211,8 +235,7 @@ class SpiralMathTestDatasetBuilder(RLDatasetBuilder):
                 renderer=renderer,
             )
 
-            # Wrap in RLTestSetEvaluator with unique name for separate metrics
-            evaluator = RLTestSetEvaluator(
+            evaluator = MathTestEvaluator(
                 dataset=test_dataset,
                 max_tokens=self.max_tokens,  # Default, can be overridden
                 name=f"eval/math/{dataset_name}"  # e.g., "eval/math/aime"

@@ -34,7 +34,7 @@ from spiral.tinker.env import SpiralTwoPlayerEnvGroupBuilder
 from spiral.tinker.evaluator import AsyncEvalRunner
 from spiral.tinker.rollouts import do_group_rollout_with_draw_retry
 from spiral.tinker.train_step import train_step as spiral_train_step
-from spiral.tinker.utils import convert_to_json_serializable, WandbLoggerWithReinit
+from spiral.tinker.utils import convert_to_json_serializable, setup_logging
 from tqdm.asyncio import tqdm
 
 logger = logging.getLogger(__name__)
@@ -197,7 +197,7 @@ async def create_spiral_train_loop(cfg: train.Config):
         cfg: Training configuration
     """
     # Setup training logger
-    ml_logger = ml_log.setup_logging(
+    ml_logger = setup_logging(
         log_dir=cfg.log_path,
         wandb_project=cfg.wandb_project,
         config=cfg,
@@ -209,10 +209,10 @@ async def create_spiral_train_loop(cfg: train.Config):
     eval_runner = None
     if cfg.eval_every > 0 and cfg.wandb_project:
         eval_wandb_name = f"{cfg.wandb_name}_eval" if cfg.wandb_name else None
-        eval_logger = WandbLoggerWithReinit(
-            project=cfg.wandb_project,
-            config=cfg,
+        eval_logger = setup_logging(
             log_dir=cfg.log_path,
+            wandb_project=cfg.wandb_project,
+            config=cfg,
             wandb_name=eval_wandb_name,
             reinit="create_new",
         )
