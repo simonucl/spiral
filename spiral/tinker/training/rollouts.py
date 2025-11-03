@@ -16,20 +16,24 @@
 
 import asyncio
 import logging
-from typing import Any, Dict, List, Sequence
+from typing import Any, Dict, List, Optional, Sequence
 
+import tinker
 import weave
 from tinker import ModelInput
-from tinker_cookbook.completers import TokenCompleter
-from tinker_cookbook.rl.types import (Env, EnvGroupBuilder, Observation,
-                                      Trajectory, TrajectoryGroup, Transition)
+from tinker_cookbook.completers import TokenCompleter, TinkerTokenCompleter
+from tinker_cookbook.rl.types import (
+    Env,
+    EnvGroupBuilder,
+    Observation,
+    Trajectory,
+    TrajectoryGroup,
+    Transition,
+)
 from tinker_cookbook.tokenizer_utils import get_tokenizer
+from tinker_cookbook.utils.trace import scope
 
-from spiral.tinker.env import SpiralTwoPlayerEnvGroupBuilder
-import asyncio
-from tinker_cookbook.rl.rollouts import do_single_rollout
-from tinker_cookbook.rl.types import Env, TrajectoryGroup
-from typing import Sequence
+from spiral.tinker.training.env import SpiralTwoPlayerEnvGroupBuilder
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
@@ -183,3 +187,48 @@ async def do_group_rollout_with_draw_retry(
 
     # Should never reach here, but return last trajectory group just in case
     return traj_group
+
+
+@scope
+async def do_group_rollout_and_filter_constant_reward(
+    sampling_client: tinker.SamplingClient,
+    env_group_builder: EnvGroupBuilder,
+    max_tokens: int,
+    do_remove_constant_reward_groups: bool,
+    opponent_sampling_client: Optional[tinker.SamplingClient] = None,
+) -> TrajectoryGroup | None:
+    """
+    Do a group rollout with draw retry (if builder supports it) and optionally filter constant rewards.
+
+    Args:
+        sampling_client: Sampling client for policy
+        env_group_builder: Environment group builder
+        max_tokens: Max tokens for generation
+        do_remove_constant_reward_groups: Whether to filter constant reward groups
+        opponent_sampling_client: Optional opponent sampling client for FSP mode
+
+    Returns:
+        TrajectoryGroup or None if filtered
+    """
+    policy = TinkerTokenCompleter(sampling_client, max_tokens=max_tokens)
+    opponent_policy = None
+    if opponent_sampling_client is not None:
+        opponent_policy = TinkerTokenCompleter(opponent_sampling_client, max_tokens=max_tokens)
+
+    # Use custom rollout with draw retry if this is a SPIRAL builder
+    if isinstance(env_group_builder, SpiralTwoPlayerEnvGroupBuilder):
+        trajectory_group = await do_group_rollout_with_draw_retry(
+            env_group_builder, policy, opponent_policy=opponent_policy
+        )
+    else:
+        # Standard rollout for non-SPIRAL builders
+        policies = [policy, opponent_policy] if opponent_policy else policy
+        trajectory_group = await do_group_rollout(env_group_builder, policies)
+
+    # Remove if all trajectories have the same reward
+    trajectory_groups = [trajectory_group]
+    # if do_remove_constant_reward_groups:
+    #     trajectory_groups = remove_constant_reward_groups(trajectory_groups)
+    if len(trajectory_groups) == 0:
+        return None
+    return trajectory_groups[0]

@@ -16,10 +16,8 @@
 
 from typing import Any, Dict
 
-from tinker_cookbook.utils.misc_utils import dict_mean, safezip
 from tinker_cookbook.utils.ml_log import WandbLogger, dump_config
 from pathlib import Path
-import os
 import wandb
 from tinker_cookbook.utils.ml_log import Logger, configure_logging_module
 from tinker_cookbook.utils.ml_log import JsonLogger, PrettyPrintLogger, WandbLogger, NeptuneLogger, TrackioLogger, MultiplexLogger

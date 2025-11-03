@@ -25,8 +25,8 @@ from tinker_cookbook.rl.types import (EnvGroupBuilder, RLDataset,
                                       RLDatasetBuilder)
 
 from spiral.agents.random import RandomAgent
-from spiral.tinker.env import SpiralTwoPlayerEnvGroupBuilder
 from spiral.tinker.renderer import get_spiral_renderer
+from spiral.tinker.training.env import SpiralTwoPlayerEnvGroupBuilder
 
 logger = logging.getLogger(__name__)
 

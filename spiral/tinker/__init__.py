@@ -15,20 +15,27 @@
 """Tinker integration for SPIRAL self-play training."""
 
 from spiral.tinker.dataset import SpiralRLDatasetBuilder
-from spiral.tinker.env import (ILLEGAL_MOVE_REWARD, INVALID_ACTION,
-                               SpiralTwoPlayerEnv,
-                               SpiralTwoPlayerEnvGroupBuilder,
-                               TwoPlayerCoordinator)
-from spiral.tinker.evaluator import GameEvaluator
-from spiral.tinker.math_test import (SpiralMathTestDataset,
-                                     SpiralMathTestDatasetBuilder)
+from spiral.tinker.eval import GameEvaluator
+from spiral.tinker.eval.math_test import (
+    SpiralMathTestDataset,
+    SpiralMathTestDatasetBuilder,
+)
 from spiral.tinker.renderer import SpiralRenderer, get_spiral_renderer
-from spiral.tinker.rollouts import (do_group_rollout,
-                                    do_group_rollout_with_draw_retry,
-                                    do_single_rollout)
-from spiral.tinker.train import (create_spiral_train_loop,
-                                 do_sync_training_spiral)
-from spiral.tinker.train_step import train_step
+from spiral.tinker.training import (
+    PopulationManager,
+    SpiralTwoPlayerEnv,
+    SpiralTwoPlayerEnvGroupBuilder,
+    create_spiral_train_loop,
+    do_group_rollout,
+    do_group_rollout_with_draw_retry,
+    do_single_rollout,
+    train_step,
+)
+from spiral.tinker.training.env import (
+    ILLEGAL_MOVE_REWARD,
+    INVALID_ACTION,
+    TwoPlayerCoordinator,
+)
 from spiral.tinker.utils import compute_trajectory_metrics
 
 __all__ = [
@@ -51,8 +58,8 @@ __all__ = [
     "do_group_rollout_with_draw_retry",
     # Training
     "create_spiral_train_loop",
-    "do_sync_training_spiral",
     "train_step",
+    "PopulationManager",
     # Evaluation
     "GameEvaluator",
     # Utils
