@@ -104,15 +104,9 @@ class SpiralTwoPlayerEnv(Env):
     player_id: int  # 0 or 1
     env_id: str
     coordinator: TwoPlayerCoordinator
-    self_play: bool
     renderer: SpiralRenderer
-    opponent_policy: Any | None  # MessageCompleter or RandomAgent
 
     def __post_init__(self):
-        assert self.self_play == (
-            self.opponent_policy is None
-        ), "If self_play is True, opponent_policy must be None"
-
         # Initialize action parser for validation
         try:
             self.action_parser = get_valid_action_parser(self.env_id)
@@ -129,10 +123,8 @@ class SpiralTwoPlayerEnv(Env):
     async def wait_for_turn(self) -> None:
         """If the game is not done, wait until the opponent's to finish playing their turn"""
         if not self.coordinator.game_done:
-            if self.self_play:
-                await self.coordinator.wait_across_env(self.player_id)
-            else:
-                await self.opponent_step()
+            # Always use wait_across_env - both self-play and FSP roll out both envs
+            await self.coordinator.wait_across_env(self.player_id)
 
     async def initial_observation(self) -> tuple[Observation, StopCondition]:
         # Check if it's actually our turn by looking at the shared env
@@ -142,32 +134,6 @@ class SpiralTwoPlayerEnv(Env):
                 await self.wait_for_turn()
         obs = self.get_observation()
         return obs, self.stop_condition
-
-    async def opponent_step(self) -> None:
-        """When not self_play, the opponent policy takes a step on the shared environment"""
-        assert self.opponent_policy is not None
-        opponent_player_id, opponent_observation_str = (
-            self.coordinator.shared_env.get_observation()
-        )
-        assert isinstance(opponent_player_id, int) and isinstance(
-            opponent_observation_str, str
-        )
-        assert opponent_player_id == 1 - self.player_id, (
-            f"Opponent player ID should be 1 - [the id of the policy player], "
-            f"{opponent_player_id=}, {self.player_id=}"
-        )
-
-        # Handle different opponent types
-        if isinstance(self.opponent_policy, RandomAgent):
-            # Random agent - just call it directly
-            opponent_action_text = self.opponent_policy(opponent_observation_str)
-        else:
-            # MessageCompleter (e.g., TinkerMessageCompleter for LLM opponents)
-            opponent_convo = [{"role": "user", "content": opponent_observation_str}]
-            opponent_response = await self.opponent_policy(opponent_convo)
-            opponent_action_text = opponent_response["content"]
-
-        await self.coordinator.make_move(opponent_player_id, opponent_action_text)
 
     async def step(self, action: Action) -> StepResult:
         """Take a step in the environment."""
@@ -330,8 +296,6 @@ class SpiralTwoPlayerEnvGroupBuilder(EnvGroupBuilder):
     env_id: str
     renderer: SpiralRenderer
     num_envs: int = 2
-    self_play: bool = True
-    opponent_policy: Any | None = None  # MessageCompleter or RandomAgent
 
     # SPIRAL-specific settings
     filter_draw: bool = True
@@ -384,23 +348,16 @@ class SpiralTwoPlayerEnvGroupBuilder(EnvGroupBuilder):
 
         envs = []
         for _ in range(self.num_envs // 2):
-            if self.self_play:
-                coordinator = _construct_coordinator()
-                # if self_play, then we need to share the same coordinator across all environments
-                coordinators = [coordinator for _ in range(self.num_players)]
-            else:
-                # if not self_play, we can just create a different coordinator for each environment
-                coordinators = [
-                    _construct_coordinator() for _ in range(self.num_players)
-                ]
+            # Create shared coordinator for both players to play the same game
+            # This is needed for both self-play and FSP
+            coordinator = _construct_coordinator()
+            coordinators = [coordinator for _ in range(self.num_players)]
 
             envs += [
                 SpiralTwoPlayerEnv(
                     player_id=i,
                     coordinator=coordinators[i],
                     renderer=self.renderer,
-                    self_play=self.self_play,
-                    opponent_policy=self.opponent_policy,
                     env_id=self.env_id,
                 )
                 for i in range(2)

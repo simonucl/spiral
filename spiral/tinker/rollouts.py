@@ -26,6 +26,10 @@ from tinker_cookbook.rl.types import (Env, EnvGroupBuilder, Observation,
 from tinker_cookbook.tokenizer_utils import get_tokenizer
 
 from spiral.tinker.env import SpiralTwoPlayerEnvGroupBuilder
+import asyncio
+from tinker_cookbook.rl.rollouts import do_single_rollout
+from tinker_cookbook.rl.types import Env, TrajectoryGroup
+from typing import Sequence
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
@@ -95,26 +99,29 @@ async def do_single_rollout(policy: TokenCompleter, env: Env) -> Trajectory:
 
 
 async def do_group_rollout(
-    env_group_builder: EnvGroupBuilder, policy: TokenCompleter
+    env_group_builder: EnvGroupBuilder,
+    policy: TokenCompleter | list[TokenCompleter],
 ) -> TrajectoryGroup:
     """
-    Perform a group rollout with the given policy and environment group.
+    Perform a group rollout with given policy/policies.
 
     Args:
         env_group_builder: Builder for creating environment group
-        policy: Policy to use for action selection
+        policy: Single policy (self-play) or list of policies (FSP)
 
     Returns:
         TrajectoryGroup containing all trajectories and computed rewards
     """
     envs_G: Sequence[Env] = await env_group_builder.make_envs()
     logger.debug(f"Created {len(envs_G)} envs")
+
+    # Normalize to list for uniform handling
+    policies = policy if isinstance(policy, list) else [policy]
     trajectories_G = await asyncio.gather(
-        *[do_single_rollout(policy, env) for env in envs_G]
+        *[do_single_rollout(policies[i % len(policies)], env) for i, env in enumerate(envs_G)]
     )
-    rewards_and_metrics_G = await env_group_builder.compute_group_rewards(
-        trajectories_G
-    )
+
+    rewards_and_metrics_G = await env_group_builder.compute_group_rewards(trajectories_G)
     rewards_G, metrics_G = zip(*rewards_and_metrics_G, strict=True)
     logger.debug(f"Metrics: {metrics_G}")
     return TrajectoryGroup(trajectories_G, list(rewards_G), list(metrics_G))
@@ -123,6 +130,7 @@ async def do_group_rollout(
 async def do_group_rollout_with_draw_retry(
     env_group_builder: SpiralTwoPlayerEnvGroupBuilder,
     policy: TokenCompleter,
+    opponent_policy: TokenCompleter | None = None,
 ) -> TrajectoryGroup | None:
     """
     Perform a group rollout with draw retry logic.
@@ -132,7 +140,8 @@ async def do_group_rollout_with_draw_retry(
 
     Args:
         env_group_builder: Environment group builder (with draw retry settings)
-        policy: Policy to use for rollout
+        policy: Policy to use for rollout (player 0 in FSP mode)
+        opponent_policy: Optional opponent policy (player 1 in FSP mode)
 
     Returns:
         TrajectoryGroup with non-draw game, or draw game after max retries
@@ -143,10 +152,10 @@ async def do_group_rollout_with_draw_retry(
     )
 
     for retry in range(max_retries + 1):
-        # Perform rollout
-        traj_group = await do_group_rollout(env_group_builder, policy)
+        # Perform rollout (pass list of policies for FSP, single policy for self-play)
+        policies = [policy, opponent_policy] if opponent_policy else policy
+        traj_group = await do_group_rollout(env_group_builder, policies)
 
-        # Check for draw (all rewards == 0)
         total_rewards = traj_group.get_total_rewards()
         is_draw = all(r == 0 for r in total_rewards)
 

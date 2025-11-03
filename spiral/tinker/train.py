@@ -32,6 +32,7 @@ from tinker_cookbook.utils.trace import scope
 
 from spiral.tinker.env import SpiralTwoPlayerEnvGroupBuilder
 from spiral.tinker.evaluator import AsyncEvalRunner
+from spiral.tinker.population import PopulationManager
 from spiral.tinker.rollouts import do_group_rollout_with_draw_retry
 from spiral.tinker.train_step import train_step as spiral_train_step
 from spiral.tinker.utils import convert_to_json_serializable, setup_logging
@@ -46,6 +47,7 @@ async def do_group_rollout_and_filter_constant_reward(
     env_group_builder: EnvGroupBuilder,
     max_tokens: int,
     do_remove_constant_reward_groups: bool,
+    opponent_sampling_client: Optional[tinker.SamplingClient] = None,
 ) -> TrajectoryGroup | None:
     """
     Do a group rollout with draw retry (if builder supports it) and optionally filter constant rewards.
@@ -55,16 +57,20 @@ async def do_group_rollout_and_filter_constant_reward(
         env_group_builder: Environment group builder
         max_tokens: Max tokens for generation
         do_remove_constant_reward_groups: Whether to filter constant reward groups
+        opponent_sampling_client: Optional opponent sampling client for FSP mode
 
     Returns:
         TrajectoryGroup or None if filtered
     """
     policy = TinkerTokenCompleter(sampling_client, max_tokens=max_tokens)
+    opponent_policy = None
+    if opponent_sampling_client is not None:
+        opponent_policy = TinkerTokenCompleter(opponent_sampling_client, max_tokens=max_tokens)
 
     # Use custom rollout with draw retry if this is a SPIRAL builder
     if isinstance(env_group_builder, SpiralTwoPlayerEnvGroupBuilder):
         trajectory_group = await do_group_rollout_with_draw_retry(
-            env_group_builder, policy
+            env_group_builder, policy, opponent_policy=opponent_policy
         )
     else:
         # Standard rollout for non-SPIRAL builders
@@ -114,6 +120,18 @@ async def do_sync_training_spiral(
         eval_runner: Async eval runner for background evaluations
         tokenizer: Tokenizer
     """
+    # Initialize PopulationManager for FSP if enabled
+    population_manager = None
+    if cfg.fsp_enabled:
+        population_manager = PopulationManager(
+            pool_size=cfg.fsp_pool_size,
+            include_current=cfg.fsp_include_current,
+        )
+        logger.info(
+            f"[FSP] Initialized PopulationManager: pool_size={cfg.fsp_pool_size}, "
+            f"include_current={cfg.fsp_include_current}, start_from={cfg.fsp_start_from}"
+        )
+
     for i_batch in range(start_batch, end_batch):
 
         if (i_batch + 1) % cfg.save_every == 0:
@@ -130,6 +148,19 @@ async def do_sync_training_spiral(
                 model_path=sampling_path
             )
 
+        # Add checkpoint to population if FSP enabled and conditions met
+        if population_manager is not None:
+            # Always update current model
+            population_manager.add_checkpoint(
+                step=i_batch, sampling_client=sampling_client, is_current=True
+            )
+
+            # Add historical checkpoint to pool at regular intervals
+            if i_batch >= cfg.fsp_start_from and i_batch % cfg.fsp_update_interval == 0:
+                population_manager.add_checkpoint(
+                    step=i_batch, sampling_client=sampling_client, is_current=False
+                )
+
         metrics = {
             "progress/batch": i_batch,
             "optim/lr": cfg.learning_rate,
@@ -140,17 +171,41 @@ async def do_sync_training_spiral(
         # Schedule evaluations to run asynchronously in background
         if cfg.eval_every > 0 and i_batch % cfg.eval_every == 0 and eval_runner:
             eval_runner.schedule_eval(evaluators, sampling_client, i_batch)
-            await eval_runner.wait_all()
-            logger.info("Evaluations completed")
-            import sys
-            sys.exit(1)
 
         # Get batch and sample trajectories
         env_group_builders_P = dataset.get_batch(i_batch)
         with timed("sample", metrics):
-            trajectory_groups_P: list[TrajectoryGroup] = await tqdm.gather(
-                *[
-                    asyncio.create_task(
+            # For FSP mode, sample matchups for each environment
+            rollout_tasks = []
+
+            if population_manager is not None and i_batch >= cfg.fsp_start_from:
+                # FSP mode: sample matchups and create rollout tasks
+                matchup_steps = []
+                for i, builder in enumerate(env_group_builders_P):
+                    step1, step2, client1, client2 = population_manager.sample_matchup()
+                    matchup_steps.append((step1, step2))
+
+                    rollout_tasks.append(asyncio.create_task(
+                        do_group_rollout_and_filter_constant_reward(
+                            client1, builder, cfg.max_tokens,
+                            cfg.remove_constant_reward_groups, client2
+                        ),
+                        name=f"sample_task_{i}",
+                    ))
+
+                # Log matchup metrics
+                opponent_steps = [s2 for _, s2 in matchup_steps]
+                mean_opp = sum(opponent_steps) / len(opponent_steps)
+                metrics.update({
+                    "fsp/opponent_step_mean": mean_opp,
+                    "fsp/opponent_step_min": min(opponent_steps),
+                    "fsp/opponent_step_max": max(opponent_steps),
+                    "fsp/self_play_ratio": sum(s1 == s2 for s1, s2 in matchup_steps) / len(matchup_steps),
+                })
+            else:
+                # Standard self-play mode - use both players' data
+                for i, builder in enumerate(env_group_builders_P):
+                    task = asyncio.create_task(
                         do_group_rollout_and_filter_constant_reward(
                             sampling_client,
                             builder,
@@ -159,8 +214,10 @@ async def do_sync_training_spiral(
                         ),
                         name=f"sample_task_{i}",
                     )
-                    for i, builder in enumerate(env_group_builders_P)
-                ],
+                    rollout_tasks.append(task)
+
+            trajectory_groups_P: list[TrajectoryGroup] = await tqdm.gather(
+                *rollout_tasks,
                 desc=f"Batch {i_batch} rollouts",
             )
 
@@ -178,6 +235,11 @@ async def do_sync_training_spiral(
             trajectory_groups_P,
             sampling_client,
         )
+
+        # Add FSP population metrics
+        if population_manager is not None:
+            fsp_metrics = population_manager.get_population_stats()
+            metrics.update(fsp_metrics)
 
         # Log metrics
         metrics.update(train_step_metrics)

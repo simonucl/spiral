@@ -54,7 +54,7 @@ class SpiralConfig(train.Config):
     num_substeps: int = 1
 
     # SPIRAL-specific settings
-    filter_draw: bool = True
+    filter_draw: bool = False
     max_draw_retries: int = 5
     use_role_baseline: bool = True
     role_baseline_ema_gamma: float = 0.95
@@ -88,6 +88,13 @@ class SpiralConfig(train.Config):
     # Advanced: streaming minibatch (optional)
     use_streaming: bool = False
     num_minibatches: int = 4
+
+    # Fictitious self-play (FSP) settings
+    fsp_enabled: bool = False  # Enable fictitious self-play
+    fsp_start_from: int = 0  # Step to start FSP (before this, use standard self-play)
+    fsp_update_interval: int = 10  # Add checkpoint to pool every N steps
+    fsp_pool_size: int = 5  # Maximum number of historical checkpoints in pool
+    fsp_include_current: bool = True  # Whether current model is available for sampling
 
 
 def parse_template_overrides(override_str: str) -> dict[str, str]:
