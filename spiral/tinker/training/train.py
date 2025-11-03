@@ -30,61 +30,21 @@ from tinker_cookbook.utils import ml_log
 from tinker_cookbook.utils.misc_utils import timed
 from tinker_cookbook.utils.trace import scope
 
-from spiral.tinker.env import SpiralTwoPlayerEnvGroupBuilder
-from spiral.tinker.evaluator import AsyncEvalRunner
-from spiral.tinker.population import PopulationManager
-from spiral.tinker.rollouts import do_group_rollout_with_draw_retry
-from spiral.tinker.train_step import train_step as spiral_train_step
+from spiral.tinker.eval.evaluator import AsyncEvalRunner
+from spiral.tinker.training.async_actor_learner.actor import ActorLoop
+from spiral.tinker.training.async_actor_learner.learner import LearnerLoop
+from spiral.tinker.training.async_actor_learner.replay_buffer import ReplayBuffer
+from spiral.tinker.training.env import SpiralTwoPlayerEnvGroupBuilder
+from spiral.tinker.training.population import PopulationManager
+from spiral.tinker.training.rollouts import (
+    do_group_rollout_and_filter_constant_reward,
+    do_group_rollout_with_draw_retry,
+)
+from spiral.tinker.training.train_step import train_step as spiral_train_step
 from spiral.tinker.utils import convert_to_json_serializable, setup_logging
 from tqdm.asyncio import tqdm
 
 logger = logging.getLogger(__name__)
-
-
-@scope
-async def do_group_rollout_and_filter_constant_reward(
-    sampling_client: tinker.SamplingClient,
-    env_group_builder: EnvGroupBuilder,
-    max_tokens: int,
-    do_remove_constant_reward_groups: bool,
-    opponent_sampling_client: Optional[tinker.SamplingClient] = None,
-) -> TrajectoryGroup | None:
-    """
-    Do a group rollout with draw retry (if builder supports it) and optionally filter constant rewards.
-
-    Args:
-        sampling_client: Sampling client for policy
-        env_group_builder: Environment group builder
-        max_tokens: Max tokens for generation
-        do_remove_constant_reward_groups: Whether to filter constant reward groups
-        opponent_sampling_client: Optional opponent sampling client for FSP mode
-
-    Returns:
-        TrajectoryGroup or None if filtered
-    """
-    policy = TinkerTokenCompleter(sampling_client, max_tokens=max_tokens)
-    opponent_policy = None
-    if opponent_sampling_client is not None:
-        opponent_policy = TinkerTokenCompleter(opponent_sampling_client, max_tokens=max_tokens)
-
-    # Use custom rollout with draw retry if this is a SPIRAL builder
-    if isinstance(env_group_builder, SpiralTwoPlayerEnvGroupBuilder):
-        trajectory_group = await do_group_rollout_with_draw_retry(
-            env_group_builder, policy, opponent_policy=opponent_policy
-        )
-    else:
-        # Standard rollout for non-SPIRAL builders
-        from tinker_cookbook.rl.rollouts import do_group_rollout
-
-        trajectory_group = await do_group_rollout(env_group_builder, policy)
-
-    # Remove if all trajectories have the same reward
-    trajectory_groups = [trajectory_group]
-    # if do_remove_constant_reward_groups:
-    #     trajectory_groups = remove_constant_reward_groups(trajectory_groups)
-    if len(trajectory_groups) == 0:
-        return None
-    return trajectory_groups[0]
 
 
 @scope
@@ -248,6 +208,96 @@ async def do_sync_training_spiral(
         ml_logger.log_metrics(metrics, step=i_batch)
 
 
+@scope
+async def do_async_actor_learner_training_spiral(
+    start_batch: int,
+    num_batches: int,
+    cfg: train.Config,
+    training_client: tinker.TrainingClient,
+    service_client: tinker.ServiceClient,
+    evaluators: list,
+    dataset: RLDataset,
+    ml_logger: ml_log.Logger,
+    eval_runner: Optional[AsyncEvalRunner],
+    tokenizer: Tokenizer,
+):
+    """
+    Implements async actor-learner training with replay buffer.
+
+    The actor and learner run independently:
+    - Actor continuously generates rollouts and adds to replay buffer
+    - Learner trains on batches from buffer and updates policy
+    - Off-policy data managed with staleness threshold
+
+    Args:
+        start_batch: Starting batch index
+        num_batches: Total number of batches
+        cfg: Training configuration
+        training_client: Tinker training client
+        service_client: Tinker service client
+        evaluators: List of evaluators
+        dataset: RL dataset
+        ml_logger: Logger for metrics (training)
+        eval_runner: Async eval runner for background evaluations
+        tokenizer: Tokenizer
+    """
+    # Initialize replay buffer
+    replay_buffer = ReplayBuffer(
+        max_staleness=cfg.replay_buffer_max_staleness,
+        batch_size=cfg.batch_size,
+    )
+
+    # Initialize PopulationManager for FSP if enabled
+    population_manager = None
+    if cfg.fsp_enabled:
+        population_manager = PopulationManager(
+            pool_size=cfg.fsp_pool_size,
+            include_current=cfg.fsp_include_current,
+        )
+        logger.info(
+            f"[ASYNC] Initialized PopulationManager: pool_size={cfg.fsp_pool_size}, "
+            f"include_current={cfg.fsp_include_current}, start_from={cfg.fsp_start_from}"
+        )
+
+    # Initialize actor loop
+    actor_loop = ActorLoop(
+        cfg=cfg,
+        service_client=service_client,
+        dataset=dataset,
+        replay_buffer=replay_buffer,
+        population_manager=population_manager,
+    )
+
+    # Initialize learner loop
+    learner_loop = LearnerLoop(
+        cfg=cfg,
+        training_client=training_client,
+        service_client=service_client,
+        tokenizer=tokenizer,
+        replay_buffer=replay_buffer,
+        actor_loop=actor_loop,
+        ml_logger=ml_logger,
+        evaluators=evaluators,
+        eval_runner=eval_runner,
+        start_batch=start_batch,
+        num_batches=num_batches,
+    )
+
+    # Start actor and learner loops concurrently
+    logger.info("[ASYNC] Starting actor and learner loops")
+    actor_task = asyncio.create_task(actor_loop.run(), name="actor_loop")
+    learner_task = asyncio.create_task(learner_loop.run(), name="learner_loop")
+
+    # Wait for learner to complete (actor will keep running)
+    await learner_task
+
+    # Stop actor
+    actor_loop.stop()
+    await actor_task
+
+    logger.info("[ASYNC] Actor-learner training completed")
+
+
 async def create_spiral_train_loop(cfg: train.Config):
     """
     Main training loop for SPIRAL using Tinker.
@@ -317,9 +367,23 @@ async def create_spiral_train_loop(cfg: train.Config):
     num_batches = len(dataset)
     logger.info(f"Will train on {num_batches} batches")
 
-    # Use our custom sync training with draw retry
-    # Note: Async and streaming not yet supported with draw retry
-    if cfg.async_config is not None:
+    # Choose training mode
+    if hasattr(cfg, 'use_async_actor_learner') and cfg.use_async_actor_learner:
+        # Async actor-learner with replay buffer
+        logger.info("Using async actor-learner architecture with replay buffer")
+        await do_async_actor_learner_training_spiral(
+            start_batch=start_batch,
+            num_batches=num_batches,
+            cfg=cfg,
+            training_client=training_client,
+            service_client=service_client,
+            evaluators=evaluators,
+            dataset=dataset,
+            ml_logger=ml_logger,
+            eval_runner=eval_runner,
+            tokenizer=tokenizer,
+        )
+    elif cfg.async_config is not None:
         raise NotImplementedError(
             "Async training not yet supported with SPIRAL draw retry"
         )
@@ -328,6 +392,8 @@ async def create_spiral_train_loop(cfg: train.Config):
             "Streaming minibatch not yet supported with SPIRAL draw retry"
         )
     else:
+        # Synchronous training with draw retry
+        logger.info("Using synchronous training")
         await do_sync_training_spiral(
             start_batch=start_batch,
             end_batch=num_batches,
@@ -341,22 +407,6 @@ async def create_spiral_train_loop(cfg: train.Config):
             eval_runner=eval_runner,
             tokenizer=tokenizer,
         )
-
-    # Wait for all background evaluations to complete before finishing
-    if eval_runner:
-        await eval_runner.wait_all()
-
-    # Save final checkpoint
-    if start_batch < num_batches:
-        _ = await checkpoint_utils.save_checkpoint_async(
-            training_client=training_client,
-            name="final",
-            log_path=cfg.log_path,
-            kind="both",
-            loop_state={"batch": num_batches},
-        )
-    else:
-        logger.info("Training was already complete; nothing to do")
 
     # Cleanup
     ml_logger.close()

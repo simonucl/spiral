@@ -25,8 +25,8 @@ from tinker_cookbook.rl import train
 
 # Import SPIRAL custom train loop with draw retry
 from spiral.tinker.dataset import SpiralRLDatasetBuilder
-from spiral.tinker.train import create_spiral_train_loop
-from spiral.tinker.math_test import SpiralMathTestDatasetBuilder
+from spiral.tinker.eval.math_test import SpiralMathTestDatasetBuilder
+from spiral.tinker.training import create_spiral_train_loop
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
@@ -95,6 +95,10 @@ class SpiralConfig(train.Config):
     fsp_update_interval: int = 10  # Add checkpoint to pool every N steps
     fsp_pool_size: int = 5  # Maximum number of historical checkpoints in pool
     fsp_include_current: bool = True  # Whether current model is available for sampling
+
+    # Async actor-learner with replay buffer
+    use_async_actor_learner: bool = False  # Enable async actor-learner architecture
+    replay_buffer_max_staleness: int = 5  # Maximum staleness (steps) for replay buffer data
 
 
 def parse_template_overrides(override_str: str) -> dict[str, str]:
