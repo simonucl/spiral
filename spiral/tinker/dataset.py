@@ -191,8 +191,6 @@ class SpiralRLDatasetBuilder(RLDatasetBuilder):
             env_id=env_id,
             renderer=renderer,
             num_envs=2,
-            self_play=self_play,
-            opponent_policy=opponent_policy,
             filter_draw=self.filter_draw,
             max_draw_retries=self.max_draw_retries,
             use_role_baseline=self.use_role_baseline,
