@@ -27,7 +27,7 @@ from tinker_cookbook.rl.types import (EnvGroupBuilder, RLDataset,
 from spiral.agents.random import RandomAgent
 from spiral.tinker.renderer import get_spiral_renderer
 from spiral.tinker.training.env import SpiralTwoPlayerEnvGroupBuilder
-
+from spiral.tinker.eval.evaluator import GameEvaluator
 logger = logging.getLogger(__name__)
 
 
@@ -203,7 +203,6 @@ class SpiralRLDatasetBuilder(RLDatasetBuilder):
 
     def create_evaluator(self):
         """Create a GameEvaluator for online evaluation."""
-        from spiral.tinker.evaluator import GameEvaluator
 
         return GameEvaluator(
             eval_env_ids=self.eval_env_ids,
