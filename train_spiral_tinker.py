@@ -100,6 +100,10 @@ class SpiralConfig(train.Config):
     use_async_actor_learner: bool = False  # Enable async actor-learner architecture
     replay_buffer_max_staleness: int = 5  # Maximum staleness (steps) for replay buffer data
 
+    # Resume settings
+    load_checkpoint_path: str | None = None  # Path to training checkpoint (e.g., "tinker://.../weights/000180")
+    fsp_resume_checkpoint_base: str | None = None  # Base path for FSP checkpoints (e.g., "tinker://.../sampler_weights/")
+
 
 def parse_template_overrides(override_str: str) -> dict[str, str]:
     """Parse template overrides from string format 'env1:template1,env2:template2'."""

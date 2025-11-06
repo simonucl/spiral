@@ -14,13 +14,23 @@
 
 """Utility functions for Tinker-based SPIRAL training."""
 
+from collections import defaultdict
+from pathlib import Path
 from typing import Any, Dict
 
-from tinker_cookbook.utils.ml_log import WandbLogger, dump_config
-from pathlib import Path
+import numpy as np
 import wandb
-from tinker_cookbook.utils.ml_log import Logger, configure_logging_module
-from tinker_cookbook.utils.ml_log import JsonLogger, PrettyPrintLogger, WandbLogger, NeptuneLogger, TrackioLogger, MultiplexLogger
+from tinker_cookbook.utils.ml_log import (
+    JsonLogger,
+    Logger,
+    MultiplexLogger,
+    NeptuneLogger,
+    PrettyPrintLogger,
+    TrackioLogger,
+    WandbLogger,
+    configure_logging_module,
+    dump_config,
+)
 
 def setup_logging(
     log_dir: str,
@@ -138,9 +148,6 @@ def compute_trajectory_metrics(trajectory_groups, prefix: str = "train") -> Dict
         - "{prefix}/draw_rate"
         etc.
     """
-    from collections import defaultdict
-    import numpy as np
-
     metrics = {}
 
     # Compute per-trajectory statistics (turns per game)
@@ -254,8 +261,6 @@ def compute_trajectory_metrics(trajectory_groups, prefix: str = "train") -> Dict
 
 def convert_to_json_serializable(obj: Any) -> Any:
     """Convert numpy types and other non-serializable types to JSON-serializable types."""
-    import numpy as np
-    
     if isinstance(obj, (np.integer, np.int64, np.int32, np.int16, np.int8)):
         return int(obj)
     elif isinstance(obj, (np.floating, np.float64, np.float32, np.float16)):

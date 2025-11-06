@@ -16,7 +16,7 @@
 
 import logging
 import random
-from typing import List, Tuple
+from typing import List, Tuple, Optional
 
 import tinker
 
@@ -169,3 +169,71 @@ class PopulationManager:
         if self.include_current and self.current_client is not None:
             count += 1
         return count
+
+    async def restore_from_checkpoint_base_path(
+        self,
+        service_client: tinker.ServiceClient,
+        checkpoint_base_path: str,
+        fsp_start_from: int,
+        fsp_update_interval: int,
+        resume_step: int,
+    ):
+        """
+        Restore population from checkpoint base path when checkpoints.jsonl is unavailable.
+
+        This method constructs checkpoint paths based on the base path pattern and loads
+        the appropriate checkpoints into the FSP pool.
+
+        Args:
+            service_client: Tinker service client for creating sampling clients
+            checkpoint_base_path: Base path template (e.g., "tinker://xxx/sampler_weights/")
+            fsp_start_from: Step when FSP was enabled
+            fsp_update_interval: Interval at which checkpoints were added to pool
+            resume_step: Current training step being resumed from
+        """
+        logger.info(
+            f"[FSP] Restoring population from base path: {checkpoint_base_path}"
+        )
+
+        # Determine which steps should be in the pool
+        checkpoint_steps = []
+        for step in range(fsp_start_from, resume_step, fsp_update_interval):
+            if step % fsp_update_interval == 0:
+                checkpoint_steps.append(step)
+
+        # Keep only the most recent pool_size checkpoints
+        checkpoint_steps = checkpoint_steps[-self.pool_size :]
+
+        logger.info(
+            f"[FSP] Loading {len(checkpoint_steps)} checkpoints: {checkpoint_steps}"
+        )
+
+        # Load sampling clients for each checkpoint
+        for step in checkpoint_steps:
+            # Construct checkpoint path (assumes format: base_path + "000180")
+            checkpoint_path = f"{checkpoint_base_path}{step:06d}"
+
+            try:
+                sampling_client = service_client.create_sampling_client(
+                    model_path=checkpoint_path
+                )
+                self.population.append((step, sampling_client))
+                logger.info(
+                    f"[FSP] Restored checkpoint from step {step}: {checkpoint_path}"
+                )
+            except Exception as e:
+                logger.error(
+                    f"[FSP] Failed to load checkpoint from step {step} at {checkpoint_path}: {e}"
+                )
+
+        logger.info(
+            f"[FSP] Population restoration complete. Pool size: {len(self.population)}/{self.pool_size}"
+        )
+
+        # Log restored population stats
+        if self.population:
+            steps = [s for s, _ in self.population]
+            logger.info(
+                f"[FSP] Population steps: {sorted(steps)}, "
+                f"oldest={min(steps)}, newest={max(steps)}"
+            )

@@ -92,6 +92,19 @@ async def do_sync_training_spiral(
             f"include_current={cfg.fsp_include_current}, start_from={cfg.fsp_start_from}"
         )
 
+        # Restore population from checkpoints if resuming
+        if start_batch > 0 and hasattr(cfg, 'fsp_resume_checkpoint_base') and cfg.fsp_resume_checkpoint_base:
+            await population_manager.restore_from_checkpoint_base_path(
+                service_client=service_client,
+                checkpoint_base_path=cfg.fsp_resume_checkpoint_base,
+                fsp_start_from=cfg.fsp_start_from,
+                fsp_update_interval=cfg.fsp_update_interval,
+                resume_step=start_batch,
+            )
+            logger.info(
+                f"[FSP] Restored population with {len(population_manager)} agents"
+            )
+
     for i_batch in range(start_batch, end_batch):
 
         if (i_batch + 1) % cfg.save_every == 0:
@@ -259,6 +272,19 @@ async def do_async_actor_learner_training_spiral(
             f"include_current={cfg.fsp_include_current}, start_from={cfg.fsp_start_from}"
         )
 
+        # Restore population from checkpoints if resuming
+        if start_batch > 0 and hasattr(cfg, 'fsp_resume_checkpoint_base') and cfg.fsp_resume_checkpoint_base:
+            await population_manager.restore_from_checkpoint_base_path(
+                service_client=service_client,
+                checkpoint_base_path=cfg.fsp_resume_checkpoint_base,
+                fsp_start_from=cfg.fsp_start_from,
+                fsp_update_interval=cfg.fsp_update_interval,
+                resume_step=start_batch,
+            )
+            logger.info(
+                f"[ASYNC] Restored population with {len(population_manager)} agents"
+            )
+
     # Initialize actor loop
     actor_loop = ActorLoop(
         cfg=cfg,
@@ -334,9 +360,20 @@ async def create_spiral_train_loop(cfg: train.Config):
     logging.getLogger("httpx").setLevel(logging.WARNING)
     logging.getLogger("pylatexenc").setLevel(logging.WARNING)
 
+    # Determine start batch from checkpoint
     resume_info = checkpoint_utils.get_last_checkpoint(cfg.log_path)
     if resume_info:
         start_batch = resume_info["batch"]
+    elif hasattr(cfg, 'load_checkpoint_path') and cfg.load_checkpoint_path:
+        # Extract step from checkpoint path if provided (e.g., "tinker://.../weights/000180" -> 180)
+        import re
+        match = re.search(r'/(\d{6})$', cfg.load_checkpoint_path)
+        if match:
+            start_batch = int(match.group(1))
+            logger.info(f"Extracted start_batch={start_batch} from load_checkpoint_path")
+        else:
+            logger.warning(f"Could not extract step from checkpoint path: {cfg.load_checkpoint_path}")
+            start_batch = 0
     else:
         start_batch = 0
 

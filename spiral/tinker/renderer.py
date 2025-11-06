@@ -17,10 +17,10 @@
 import logging
 import re
 
-import weave
 import tinker
+import weave
 from tinker_cookbook.renderers import Message, Renderer, Role, get_renderer
-from tinker_cookbook.tokenizer_utils import Tokenizer
+from tinker_cookbook.tokenizer_utils import Tokenizer, get_tokenizer
 
 from spiral.utils import extract_boxed_answer
 
@@ -232,7 +232,5 @@ def get_spiral_renderer(model_name: str, template_name: str) -> SpiralRenderer:
     Returns:
         Configured SpiralRenderer
     """
-    from tinker_cookbook.tokenizer_utils import get_tokenizer
-
     tokenizer = get_tokenizer(model_name)
     return SpiralRenderer(tokenizer, template_name)
