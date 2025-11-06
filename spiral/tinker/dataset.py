@@ -28,7 +28,6 @@ from spiral.agents.random import RandomAgent
 from spiral.tinker.renderer import get_spiral_renderer
 from spiral.tinker.training.env import SpiralTwoPlayerEnvGroupBuilder
 from spiral.tinker.eval.evaluator import GameEvaluator
-
 logger = logging.getLogger(__name__)
 
 
@@ -192,8 +191,6 @@ class SpiralRLDatasetBuilder(RLDatasetBuilder):
             env_id=env_id,
             renderer=renderer,
             num_envs=2,
-            self_play=self_play,
-            opponent_policy=opponent_policy,
             filter_draw=self.filter_draw,
             max_draw_retries=self.max_draw_retries,
             use_role_baseline=self.use_role_baseline,
